@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { confirmSignUp, signIn, signUp } from 'aws-amplify/auth'
+import { confirmSignUp, getCurrentUser, signIn, signUp } from 'aws-amplify/auth'
 import './LoginPage.css'
 
 function logAuthError(context, error) {
@@ -41,6 +41,22 @@ export default function LoginPage() {
   const [pendingUsername, setPendingUsername] = useState('')
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState(null)
+
+  useEffect(() => {
+    if (mode !== 'login' && mode !== 'signup') return
+    let cancelled = false
+    ;(async () => {
+      try {
+        await getCurrentUser()
+        if (!cancelled) navigate('/home', { replace: true })
+      } catch {
+        /* no session */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [mode, navigate])
 
   const goLogin = () => {
     setFeedback(null)
@@ -113,6 +129,10 @@ export default function LoginPage() {
         he: 'לא ניתן להשלים כניסה. ייתכן שנדרש שלב נוסף (למשל אימות דו-שלבי).',
       })
     } catch (err) {
+      if (err?.name === 'UserAlreadyAuthenticatedException') {
+        navigate('/home', { replace: true })
+        return
+      }
       logAuthError('signIn', err)
       setFeedback({
         kind: 'error',
