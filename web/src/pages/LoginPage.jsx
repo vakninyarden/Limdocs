@@ -1,6 +1,13 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { confirmSignUp, signIn, signUp } from 'aws-amplify/auth'
 import './LoginPage.css'
+
+function logAuthError(context, error) {
+  const message = error?.message ?? String(error)
+  const name = error?.name ?? error?.code
+  console.warn('[Auth i18n draft]', context, { name, message, error })
+}
 
 const initialLogin = { identifier: '', password: '' }
 const initialSignup = {
@@ -30,6 +37,9 @@ export default function LoginPage() {
   const [login, setLogin] = useState(initialLogin)
   const [signup, setSignup] = useState(initialSignup)
   const [fieldErrors, setFieldErrors] = useState({})
+  const [confirmCode, setConfirmCode] = useState('')
+  const [pendingUsername, setPendingUsername] = useState('')
+  const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState(null)
 
   const goLogin = () => {
@@ -57,7 +67,27 @@ export default function LoginPage() {
     })
   }
 
-  const handleLoginSubmit = (e) => {
+  const getPasswordPolicyError = (message) => {
+    const text = String(message || '').toLowerCase()
+    if (text.includes('length') || text.includes('at least 8')) {
+      return 'הסיסמה חייבת להכיל לפחות 8 תווים'
+    }
+    if (text.includes('uppercase') || text.includes('upper case')) {
+      return 'הסיסמה חייבת לכלול לפחות אות גדולה אחת באנגלית'
+    }
+    if (text.includes('lowercase') || text.includes('lower case')) {
+      return 'הסיסמה חייבת לכלול לפחות אות קטנה אחת באנגלית'
+    }
+    if (text.includes('numeric') || text.includes('number')) {
+      return 'הסיסמה חייבת לכלול לפחות ספרה אחת'
+    }
+    if (text.includes('special') || text.includes('symbol')) {
+      return 'הסיסמה חייבת לכלול לפחות תו מיוחד אחד'
+    }
+    return 'הסיסמה לא עומדת בדרישות האבטחה'
+  }
+
+  const handleLoginSubmit = async (e) => {
     e.preventDefault()
     setFeedback(null)
     const username = login.identifier.trim()
@@ -68,10 +98,32 @@ export default function LoginPage() {
       })
       return
     }
-    navigate('/home', { replace: true, state: { username } })
+    setBusy(true)
+    try {
+      const out = await signIn({ username, password: login.password })
+      const signInDone =
+        out.isSignedIn || out.nextStep?.signInStep === 'DONE'
+      if (signInDone) {
+        navigate('/home', { replace: true })
+        return
+      }
+      logAuthError('signIn nextStep', out.nextStep)
+      setFeedback({
+        kind: 'error',
+        he: 'לא ניתן להשלים כניסה. ייתכן שנדרש שלב נוסף (למשל אימות דו-שלבי).',
+      })
+    } catch (err) {
+      logAuthError('signIn', err)
+      setFeedback({
+        kind: 'error',
+        he: 'התחברות נכשלה. בדקו את הפרטים או נסו שוב מאוחר יותר.',
+      })
+    } finally {
+      setBusy(false)
+    }
   }
 
-  const handleSignupSubmit = (e) => {
+  const handleSignupSubmit = async (e) => {
     e.preventDefault()
     setFeedback(null)
     setFieldErrors({})
@@ -99,8 +151,101 @@ export default function LoginPage() {
       setFeedback({ kind: 'error', he: 'יש לתקן את השדות המסומנים באדום.' })
       return
     }
+    setBusy(true)
+    // #region agent log
+    fetch('http://127.0.0.1:7342/ingest/c12bd9e5-3c3e-438c-8677-68452c921326',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4bfbe0'},body:JSON.stringify({sessionId:'4bfbe0',runId:'signup-debug-1',hypothesisId:'H2',location:'src/pages/LoginPage.jsx:104',message:'signUp submit payload summary',data:{usernameLength:username.length,emailDomain:(email.split('@')[1]||'').toLowerCase(),firstNameLength:firstName.length,lastNameLength:lastName.length,passwordLength:password.length,isOnline:navigator.onLine},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    try {
+      const out = await signUp({
+        username,
+        password,
+        options: {
+          userAttributes: {
+            email,
+            given_name: firstName,
+            family_name: lastName,
+          },
+        },
+      })
+      const step = out.nextStep?.signUpStep
+      // #region agent log
+      fetch('http://127.0.0.1:7342/ingest/c12bd9e5-3c3e-438c-8677-68452c921326',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4bfbe0'},body:JSON.stringify({sessionId:'4bfbe0',runId:'signup-debug-1',hypothesisId:'H3',location:'src/pages/LoginPage.jsx:117',message:'signUp response received',data:{isSignUpComplete:Boolean(out.isSignUpComplete),signUpStep:step||'none',codeDeliveryMedium:out.nextStep?.codeDeliveryDetails?.deliveryMedium||'none'},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      if (step === 'CONFIRM_SIGN_UP') {
+        setPendingUsername(username)
+        setConfirmCode('')
+        setMode('confirm')
+        setFeedback({
+          kind: 'success',
+          he: 'נשלח קוד אימות לאימייל. הזינו אותו למטה לאישור החשבון.',
+        })
+        return
+      }
+      if (out.isSignUpComplete) {
+        setFeedback({
+          kind: 'success',
+          he: 'ההרשמה הושלמה. כעת ניתן להתחבר.',
+        })
+        setMode('login')
+        return
+      }
+      logAuthError('signUp unexpected nextStep', out)
+      setFeedback({
+        kind: 'error',
+        he: 'ההרשמה לא הושלמה. נסו שוב או פנו לתמיכה.',
+      })
+    } catch (err) {
+      logAuthError('signUp', err)
+      // #region agent log
+      fetch('http://127.0.0.1:7342/ingest/c12bd9e5-3c3e-438c-8677-68452c921326',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4bfbe0'},body:JSON.stringify({sessionId:'4bfbe0',runId:'signup-debug-1',hypothesisId:'H4',location:'src/pages/LoginPage.jsx:145',message:'signUp error caught',data:{errorName:err?.name||'unknown',errorCode:err?.code||'unknown',message:String(err?.message||'').slice(0,240),suggestion:err?.recoverySuggestion||''},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      const errorName = err?.name ?? err?.code
+      const errorMessage = String(err?.message ?? '')
+      if (errorName === 'UsernameExistsException') {
+        setFieldErrors({ username: 'שם המשתמש כבר קיים במערכת' })
+      } else if (errorName === 'InvalidParameterException') {
+        setFieldErrors({ email: 'כתובת אימייל לא תקינה' })
+      } else if (errorName === 'InvalidPasswordException') {
+        setFieldErrors({
+          password: getPasswordPolicyError(errorMessage),
+        })
+      }
+      setFeedback({ kind: 'error', he: 'הרשמה נכשלה. בדקו את השדות ונסו שוב.' })
+    } finally {
+      setBusy(false)
+    }
+  }
 
-    navigate('/home', { replace: true, state: { username } })
+  const handleConfirmSubmit = async (e) => {
+    e.preventDefault()
+    setFeedback(null)
+    const code = confirmCode.trim()
+    if (!pendingUsername || !code) {
+      setFeedback({ kind: 'error', he: 'נא להזין את קוד האימות מהאימייל.' })
+      return
+    }
+    setBusy(true)
+    try {
+      await confirmSignUp({
+        username: pendingUsername,
+        confirmationCode: code,
+      })
+      setConfirmCode('')
+      setPendingUsername('')
+      setFeedback({
+        kind: 'success',
+        he: 'החשבון אושר. ניתן להתחבר.',
+      })
+      setMode('login')
+    } catch (err) {
+      logAuthError('confirmSignUp', err)
+      setFeedback({
+        kind: 'error',
+        he: 'אימות נכשל. בדקו את הקוד או שלחו קוד חדש מקונסולת Cognito.',
+      })
+    } finally {
+      setBusy(false)
+    }
   }
 
   const handleForgotPassword = () => {
@@ -159,7 +304,11 @@ export default function LoginPage() {
                   onChange={(e) => updateLogin('password', e.target.value)}
                 />
               </div>
-              <button type="submit" className="login-page__submit">
+              <button
+                type="submit"
+                className="login-page__submit"
+                disabled={busy}
+              >
                 התחברות
               </button>
               <div className="login-page__links">
@@ -179,7 +328,7 @@ export default function LoginPage() {
                 </button>
               </div>
             </form>
-          ) : (
+          ) : mode === 'signup' ? (
             <form
               aria-label="טופס יצירת חשבון"
               onSubmit={handleSignupSubmit}
@@ -270,7 +419,11 @@ export default function LoginPage() {
                   <span className="field-error">{fieldErrors.password}</span>
                 ) : null}
               </div>
-              <button type="submit" className="login-page__submit">
+              <button
+                type="submit"
+                className="login-page__submit"
+                disabled={busy}
+              >
                 צור חשבון
               </button>
               <div className="login-page__links">
@@ -280,6 +433,52 @@ export default function LoginPage() {
                   onClick={goLogin}
                 >
                   כבר יש לך חשבון? התחבר
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form
+              aria-label="אישור חשבון"
+              onSubmit={handleConfirmSubmit}
+              noValidate
+            >
+              <p className="login-page__label" style={{ marginBottom: '0.75rem' }}>
+                הזינו את קוד האימות שנשלח ל־
+                <strong dir="ltr"> {signup.email.trim() || 'האימייל שלך'}</strong>
+              </p>
+              <div className="login-page__field">
+                <label className="login-page__label" htmlFor="confirm-code">
+                  קוד אימות
+                </label>
+                <input
+                  id="confirm-code"
+                  className="login-page__input"
+                  type="text"
+                  name="confirmationCode"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  value={confirmCode}
+                  onChange={(e) => setConfirmCode(e.target.value)}
+                />
+              </div>
+              <button
+                type="submit"
+                className="login-page__submit"
+                disabled={busy}
+              >
+                אשר חשבון
+              </button>
+              <div className="login-page__links">
+                <button
+                  type="button"
+                  className="login-page__link"
+                  onClick={() => {
+                    setPendingUsername('')
+                    setConfirmCode('')
+                    goLogin()
+                  }}
+                >
+                  חזרה להתחברות
                 </button>
               </div>
             </form>
