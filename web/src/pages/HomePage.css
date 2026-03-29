@@ -1,0 +1,46 @@
+.home-page {
+  min-height: 100svh;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 1.5rem;
+  background: #f5f3ff;
+  font-family: system-ui, 'Segoe UI', sans-serif;
+}
+
+.home-page__greeting {
+  margin: 0 0 1rem;
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  font-weight: 600;
+  color: #312e81;
+}
+
+.home-page__greeting--muted {
+  color: #6366a1;
+  font-weight: 500;
+}
+
+.home-page__logout {
+  margin-top: 0.5rem;
+  padding: 0.65rem 1.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  color: #fff;
+  background: linear-gradient(135deg, #5b21b6, #7c3aed);
+  border: none;
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(91, 33, 182, 0.35);
+}
+
+.home-page__logout:hover {
+  filter: brightness(1.05);
+}
+
+.home-page__logout:focus-visible {
+  outline: 2px solid #7c3aed;
+  outline-offset: 2px;
+}
