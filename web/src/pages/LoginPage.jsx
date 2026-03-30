@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { confirmSignUp, getCurrentUser, signIn, signUp } from 'aws-amplify/auth'
 import './LoginPage.css'
+import { useLanguageControl } from '../language-control/LanguageControlProvider.jsx'
 
 function logAuthError(context, error) {
   const message = error?.message ?? String(error)
@@ -18,14 +19,6 @@ const initialSignup = {
   password: '',
 }
 
-const signupRequirementMessages = {
-  fullName: 'חובה להזין שם מלא (לפחות 2 מילים).',
-  email: 'יש להזין כתובת אימייל תקינה (למשל: name@example.com).',
-  username: 'שם משתמש חייב להכיל לפחות 3 תווים, ללא רווחים.',
-  password:
-    'הסיסמה אינה עומדת בדרישות. עליה להכיל:\n • לפחות 8 תווים\n • אות גדולה (A-Z) ואות קטנה (a-z)\n • לפחות מספר אחד (0-9)\n • תו מיוחד (למשל: !, @, #, $)',
-}
-
 function Feedback({ feedback }) {
   if (!feedback) return null
   const className =
@@ -34,22 +27,32 @@ function Feedback({ feedback }) {
       : 'login-page__feedback login-page__feedback--error'
   return (
     <p className={className} role="alert">
-      {feedback.he}
+      {feedback.message}
     </p>
   )
 }
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const { t, lang, setLang, dir } = useLanguageControl()
   const [mode, setMode] = useState('login')
   const [login, setLogin] = useState(initialLogin)
   const [loginErrors, setLoginErrors] = useState({})
+  const [showConfirmLink, setShowConfirmLink] = useState(false)
   const [signup, setSignup] = useState(initialSignup)
   const [fieldErrors, setFieldErrors] = useState({})
   const [confirmCode, setConfirmCode] = useState('')
   const [pendingUsername, setPendingUsername] = useState('')
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState(null)
+  const signupRequirementMessages = t.login.requirements
+
+  useEffect(() => {
+    setFeedback(null)
+    setLoginErrors({})
+    setFieldErrors({})
+    setShowConfirmLink(false)
+  }, [lang])
 
   useEffect(() => {
     if (mode !== 'login' && mode !== 'signup') return
@@ -70,6 +73,7 @@ export default function LoginPage() {
   const goLogin = () => {
     setFeedback(null)
     setLoginErrors({})
+    setShowConfirmLink(false)
     setMode('login')
   }
 
@@ -77,11 +81,13 @@ export default function LoginPage() {
     setFeedback(null)
     setLoginErrors({})
     setFieldErrors({})
+    setShowConfirmLink(false)
     setMode('signup')
   }
 
   const updateLogin = (field, value) => {
     setLogin((prev) => ({ ...prev, [field]: value }))
+    setShowConfirmLink(false)
     setLoginErrors((prev) => {
       if (!prev[field]) return prev
       const next = { ...prev }
@@ -104,19 +110,20 @@ export default function LoginPage() {
     e.preventDefault()
     setFeedback(null)
     setLoginErrors({})
+    setShowConfirmLink(false)
     const username = login.identifier.trim()
     const nextLoginErrors = {}
     if (!username) {
-      nextLoginErrors.identifier = 'יש להזין שם משתמש או אימייל.'
+      nextLoginErrors.identifier = t.login.requiredIdentifier
     }
     if (!login.password) {
-      nextLoginErrors.password = 'יש להזין סיסמה.'
+      nextLoginErrors.password = t.login.requiredPassword
     }
     if (Object.keys(nextLoginErrors).length > 0) {
       setLoginErrors(nextLoginErrors)
       setFeedback({
         kind: 'error',
-        he: 'יש למלא את השדות המסומנים באדום.',
+        message: t.login.fillMarkedFields,
       })
       return
     }
@@ -132,7 +139,7 @@ export default function LoginPage() {
       logAuthError('signIn nextStep', out.nextStep)
       setFeedback({
         kind: 'error',
-        he: 'לא ניתן להשלים כניסה. ייתכן שנדרש שלב נוסף (למשל אימות דו-שלבי).',
+        message: t.login.signInNextStep,
       })
     } catch (err) {
       if (err?.name === 'UserAlreadyAuthenticatedException') {
@@ -142,21 +149,25 @@ export default function LoginPage() {
       logAuthError('signIn', err)
       const errorName = err?.name ?? err?.code
       if (errorName === 'UserNotFoundException') {
+        setShowConfirmLink(false)
         setLoginErrors({
-          identifier: 'שם המשתמש או האימייל אינם קיימים במערכת',
+          identifier: t.login.userNotFound,
         })
       } else if (errorName === 'NotAuthorizedException') {
+        setShowConfirmLink(false)
         setLoginErrors({
-          password: 'הסיסמה שהזנת אינה נכונה. נסה שנית.',
+          password: t.login.wrongPassword,
         })
       } else if (errorName === 'UserNotConfirmedException') {
+        setShowConfirmLink(true)
         setLoginErrors({
-          identifier: 'חשבונך טרם אומת. בדוק את המייל לקוד אישור.',
+          identifier: t.login.userNotConfirmed,
         })
       } else {
+        setShowConfirmLink(false)
         setFeedback({
           kind: 'error',
-          he: 'התחברות נכשלה. בדקו את הפרטים או נסו שוב מאוחר יותר.',
+          message: t.login.signInFailed,
         })
       }
     } finally {
@@ -203,7 +214,7 @@ export default function LoginPage() {
 
     if (Object.keys(nextFieldErrors).length > 0) {
       setFieldErrors(nextFieldErrors)
-      setFeedback({ kind: 'error', he: 'יש לתקן את השדות המסומנים באדום.' })
+      setFeedback({ kind: 'error', message: t.login.fixMarkedFields })
       return
     }
     setBusy(true)
@@ -232,14 +243,14 @@ export default function LoginPage() {
         setMode('confirm')
         setFeedback({
           kind: 'success',
-          he: 'נשלח קוד אימות לאימייל. הזינו אותו למטה לאישור החשבון.',
+          message: t.login.signUpCodeSent,
         })
         return
       }
       if (out.isSignUpComplete) {
         setFeedback({
           kind: 'success',
-          he: 'ההרשמה הושלמה. כעת ניתן להתחבר.',
+          message: t.login.signUpComplete,
         })
         setMode('login')
         return
@@ -247,7 +258,7 @@ export default function LoginPage() {
       logAuthError('signUp unexpected nextStep', out)
       setFeedback({
         kind: 'error',
-        he: 'ההרשמה לא הושלמה. נסו שוב או פנו לתמיכה.',
+        message: t.login.signUpNotComplete,
       })
     } catch (err) {
       logAuthError('signUp', err)
@@ -264,7 +275,7 @@ export default function LoginPage() {
           password: signupRequirementMessages.password,
         })
       }
-      setFeedback({ kind: 'error', he: 'הרשמה נכשלה. בדקו את השדות ונסו שוב.' })
+      setFeedback({ kind: 'error', message: t.login.signUpFailed })
     } finally {
       setBusy(false)
     }
@@ -275,7 +286,7 @@ export default function LoginPage() {
     setFeedback(null)
     const code = confirmCode.trim()
     if (!pendingUsername || !code) {
-      setFeedback({ kind: 'error', he: 'נא להזין את קוד האימות מהאימייל.' })
+      setFeedback({ kind: 'error', message: t.login.confirmCodeRequired })
       return
     }
     setBusy(true)
@@ -288,14 +299,14 @@ export default function LoginPage() {
       setPendingUsername('')
       setFeedback({
         kind: 'success',
-        he: 'החשבון אושר. ניתן להתחבר.',
+        message: t.login.confirmSuccess,
       })
       setMode('login')
     } catch (err) {
       logAuthError('confirmSignUp', err)
       setFeedback({
         kind: 'error',
-        he: 'אימות נכשל. בדקו את הקוד או שלחו קוד חדש מקונסולת Cognito.',
+        message: t.login.confirmFailed,
       })
     } finally {
       setBusy(false)
@@ -303,20 +314,34 @@ export default function LoginPage() {
   }
 
   const handleForgotPassword = () => {
-    console.log('[שכחתי סיסמה]', { identifier: login.identifier })
+    console.log('[forgot-password]', { identifier: login.identifier })
   }
 
   return (
-    <div className="login-page" dir="rtl" lang="he">
+    <div className="login-page" dir={dir} lang={lang}>
       <div className="login-page__inner">
+        <div className="login-page__lang-switch" role="group" aria-label={t.common.switchLanguage}>
+          <button
+            type="button"
+            className={`login-page__lang-btn ${lang === 'he' ? 'login-page__lang-btn--active' : ''}`}
+            onClick={() => setLang('he')}
+          >
+            {t.common.langHe}
+          </button>
+          <button
+            type="button"
+            className={`login-page__lang-btn ${lang === 'en' ? 'login-page__lang-btn--active' : ''}`}
+            onClick={() => setLang('en')}
+          >
+            {t.common.langEn}
+          </button>
+        </div>
         <header className="login-page__brand">
           <div className="login-page__logo" aria-hidden>
             L
           </div>
-          <h1 className="login-page__title">לימדוקס</h1>
-          <p className="login-page__subtitle">
-            למידה מותאמת אישית — התחברו או צרו חשבון
-          </p>
+          <h1 className="login-page__title">{t.login.brandTitle}</h1>
+          <p className="login-page__subtitle">{t.login.brandSubtitle}</p>
         </header>
 
         <div className="login-page__card">
@@ -324,13 +349,13 @@ export default function LoginPage() {
 
           {mode === 'login' ? (
             <form
-              aria-label="טופס התחברות"
+              aria-label={t.login.loginFormLabel}
               onSubmit={handleLoginSubmit}
               noValidate
             >
               <div className="login-page__field">
                 <label className="login-page__label" htmlFor="login-identifier">
-                  שם משתמש או אימייל
+                  {t.login.identifierLabel}
                 </label>
                 <input
                   id="login-identifier"
@@ -346,7 +371,7 @@ export default function LoginPage() {
                 {loginErrors.identifier ? (
                   <span className="field-error">{loginErrors.identifier}</span>
                 ) : null}
-                {loginErrors.identifier === 'חשבונך טרם אומת. בדוק את המייל לקוד אישור.' ? (
+                {showConfirmLink && loginErrors.identifier ? (
                   <button
                     type="button"
                     className="login-page__link"
@@ -355,13 +380,13 @@ export default function LoginPage() {
                       setMode('confirm')
                     }}
                   >
-                    מעבר למסך אישור חשבון
+                    {t.login.goToConfirm}
                   </button>
                 ) : null}
               </div>
               <div className="login-page__field">
                 <label className="login-page__label" htmlFor="login-password">
-                  סיסמה
+                  {t.login.passwordLabel}
                 </label>
                 <input
                   id="login-password"
@@ -381,7 +406,7 @@ export default function LoginPage() {
                 className="login-page__submit"
                 disabled={busy}
               >
-                התחברות
+                {t.login.loginButton}
               </button>
               <div className="login-page__links">
                 <button
@@ -389,26 +414,26 @@ export default function LoginPage() {
                   className="login-page__link"
                   onClick={handleForgotPassword}
                 >
-                  שכחתי סיסמה
+                  {t.login.forgotPassword}
                 </button>
                 <button
                   type="button"
                   className="login-page__link"
                   onClick={goSignup}
                 >
-                  צור חשבון חדש
+                  {t.login.createNewAccount}
                 </button>
               </div>
             </form>
           ) : mode === 'signup' ? (
             <form
-              aria-label="טופס יצירת חשבון"
+              aria-label={t.login.signupFormLabel}
               onSubmit={handleSignupSubmit}
               noValidate
             >
               <div className="login-page__field">
                 <label className="login-page__label" htmlFor="signup-first-name">
-                  שם פרטי
+                  {t.login.firstNameLabel}
                 </label>
                 <input
                   id="signup-first-name"
@@ -425,7 +450,7 @@ export default function LoginPage() {
               </div>
               <div className="login-page__field">
                 <label className="login-page__label" htmlFor="signup-last-name">
-                  שם משפחה
+                  {t.login.lastNameLabel}
                 </label>
                 <input
                   id="signup-last-name"
@@ -442,7 +467,7 @@ export default function LoginPage() {
               </div>
               <div className="login-page__field">
                 <label className="login-page__label" htmlFor="signup-email">
-                  אימייל
+                  {t.login.emailLabel}
                 </label>
                 <input
                   id="signup-email"
@@ -459,7 +484,7 @@ export default function LoginPage() {
               </div>
               <div className="login-page__field">
                 <label className="login-page__label" htmlFor="signup-username">
-                  שם משתמש
+                  {t.login.usernameLabel}
                 </label>
                 <input
                   id="signup-username"
@@ -476,7 +501,7 @@ export default function LoginPage() {
               </div>
               <div className="login-page__field">
                 <label className="login-page__label" htmlFor="signup-password">
-                  סיסמה
+                  {t.login.passwordLabel}
                 </label>
                 <input
                   id="signup-password"
@@ -496,7 +521,7 @@ export default function LoginPage() {
                 className="login-page__submit"
                 disabled={busy}
               >
-                צור חשבון
+                {t.login.signupButton}
               </button>
               <div className="login-page__links">
                 <button
@@ -504,23 +529,23 @@ export default function LoginPage() {
                   className="login-page__link"
                   onClick={goLogin}
                 >
-                  כבר יש לך חשבון? התחבר
+                  {t.login.alreadyHaveAccount}
                 </button>
               </div>
             </form>
           ) : (
             <form
-              aria-label="אישור חשבון"
+              aria-label={t.login.confirmFormLabel}
               onSubmit={handleConfirmSubmit}
               noValidate
             >
               <p className="login-page__label" style={{ marginBottom: '0.75rem' }}>
-                הזינו את קוד האימות שנשלח ל־
-                <strong dir="ltr"> {signup.email.trim() || 'האימייל שלך'}</strong>
+                {t.login.confirmPrompt}{' '}
+                <strong dir="ltr"> {signup.email.trim() || t.login.yourEmail}</strong>
               </p>
               <div className="login-page__field">
                 <label className="login-page__label" htmlFor="confirm-code">
-                  קוד אימות
+                  {t.login.confirmCodeLabel}
                 </label>
                 <input
                   id="confirm-code"
@@ -538,7 +563,7 @@ export default function LoginPage() {
                 className="login-page__submit"
                 disabled={busy}
               >
-                אשר חשבון
+                {t.login.confirmButton}
               </button>
               <div className="login-page__links">
                 <button
@@ -550,14 +575,14 @@ export default function LoginPage() {
                     goLogin()
                   }}
                 >
-                  חזרה להתחברות
+                  {t.login.backToLogin}
                 </button>
               </div>
             </form>
           )}
         </div>
 
-        <p className="login-page__footer">לימדוקס — פלטפורמת למידה אדפטיבית</p>
+        <p className="login-page__footer">{t.login.footer}</p>
       </div>
     </div>
   )

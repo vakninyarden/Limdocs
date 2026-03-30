@@ -37,6 +37,31 @@
   max-width: 420px;
 }
 
+.login-page__lang-switch {
+  display: inline-flex;
+  border: 1px solid var(--lp-border);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 1rem;
+  background: var(--lp-white);
+}
+
+.login-page__lang-btn {
+  border: none;
+  background: transparent;
+  color: var(--lp-purple-800);
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0.35rem 0.75rem;
+}
+
+.login-page__lang-btn--active {
+  background: linear-gradient(135deg, var(--lp-purple-700), var(--lp-purple-600));
+  color: var(--lp-white);
+}
+
 .login-page__brand {
   text-align: center;
   margin-bottom: 1.75rem;
@@ -158,7 +183,7 @@
   line-height: 1.5;
   white-space: pre-line;
   overflow-wrap: anywhere;
-  text-align: right;
+  text-align: start;
 }
 
 .login-page__submit {
