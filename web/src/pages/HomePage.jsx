@@ -59,9 +59,9 @@ export default function HomePage() {
   if (status === 'loading') {
     return (
       <main className="home-page" dir="rtl" lang="he">
-        <p className="home-page__greeting home-page__greeting--muted">
-          טוען…
-        </p>
+        <section className="home-page__loading">
+          <p className="home-page__greeting home-page__greeting--muted">טוען…</p>
+        </section>
       </main>
     )
   }
@@ -72,14 +72,47 @@ export default function HomePage() {
 
   return (
     <main className="home-page" dir="rtl" lang="he">
-      <p className="home-page__greeting">Hello, {displayName}</p>
-      <button
-        type="button"
-        className="home-page__logout"
-        onClick={handleLogout}
-      >
-        התנתקות
-      </button>
+      <aside className="home-page__sidebar" aria-label="ניווט ראשי">
+        <div className="home-page__brand">
+          <div className="home-page__logo" aria-hidden>
+            L
+          </div>
+          <p className="home-page__brand-name">Limdocs</p>
+        </div>
+
+        <nav className="home-page__menu">
+          <button type="button" className="home-page__menu-item home-page__menu-item--active">
+            <span aria-hidden>🏠</span>
+            <span>דאשבורד</span>
+          </button>
+          <button type="button" className="home-page__menu-item">
+            <span aria-hidden>📚</span>
+            <span>הקורסים שלי</span>
+          </button>
+          <button type="button" className="home-page__menu-item">
+            <span aria-hidden>👤</span>
+            <span>פרופיל</span>
+          </button>
+        </nav>
+
+        <button type="button" className="home-page__logout" onClick={handleLogout}>
+          <span aria-hidden>↩</span>
+          <span>התנתקות</span>
+        </button>
+      </aside>
+
+      <section className="home-page__content">
+        <div className="home-page__welcome-panel">
+          <div>
+            <p className="home-page__eyebrow">דאשבורד</p>
+            <h1 className="home-page__greeting">שלום, {displayName || 'Guest'}</h1>
+            <p className="home-page__subtext">מוכנים להתחיל? כאן תוכלו להתחיל לבנות סביבת למידה חדשה.</p>
+          </div>
+          <button type="button" className="home-page__primary-action">
+            ליצירת קורס חדש
+          </button>
+        </div>
+      </section>
     </main>
   )
 }
