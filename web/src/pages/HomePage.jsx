@@ -19,6 +19,12 @@ export default function HomePage() {
   const { t, lang, setLang, dir, tx } = useLanguageControl()
   const [status, setStatus] = useState('loading')
   const [displayName, setDisplayName] = useState('')
+  const [isCreateCourseOpen, setIsCreateCourseOpen] = useState(false)
+  const [courseDraft, setCourseDraft] = useState({
+    name: '',
+    description: '',
+    visibility: 'private',
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -56,6 +62,25 @@ export default function HomePage() {
       logAuthError('signOut', e)
     }
     navigate('/', { replace: true })
+  }
+
+  const updateCourseDraft = (field, value) => {
+    setCourseDraft((prev) => ({ ...prev, [field]: value }))
+  }
+
+  const closeCreateCourseModal = () => {
+    setIsCreateCourseOpen(false)
+    setCourseDraft({
+      name: '',
+      description: '',
+      visibility: 'private',
+    })
+  }
+
+  const handleCreateCourseSubmit = (e) => {
+    e.preventDefault()
+    console.log('[create-course-draft]', courseDraft)
+    closeCreateCourseModal()
   }
 
   if (status === 'loading') {
@@ -128,11 +153,95 @@ export default function HomePage() {
             </h1>
             <p className="home-page__subtext">{t.home.subtext}</p>
           </div>
-          <button type="button" className="home-page__primary-action">
+          <button
+            type="button"
+            className="home-page__primary-action"
+            onClick={() => setIsCreateCourseOpen(true)}
+          >
             {t.home.createCourse}
           </button>
         </div>
       </section>
+      {isCreateCourseOpen ? (
+        <div
+          className="home-page__modal-backdrop"
+          role="presentation"
+          onClick={closeCreateCourseModal}
+        >
+          <section
+            className="home-page__modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t.home.createCourseModalTitle}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="home-page__modal-title">{t.home.createCourseModalTitle}</h2>
+            <p className="home-page__modal-subtitle">{t.home.createCourseModalSubtitle}</p>
+            <form onSubmit={handleCreateCourseSubmit} className="home-page__modal-form">
+              <label className="home-page__modal-label" htmlFor="course-name">
+                {t.home.courseNameLabel}
+              </label>
+              <input
+                id="course-name"
+                className="home-page__modal-input"
+                type="text"
+                value={courseDraft.name}
+                onChange={(e) => updateCourseDraft('name', e.target.value)}
+                placeholder={t.home.courseNamePlaceholder}
+              />
+
+              <label className="home-page__modal-label" htmlFor="course-description">
+                {t.home.courseDescriptionLabel}
+              </label>
+              <textarea
+                id="course-description"
+                className="home-page__modal-textarea"
+                rows={4}
+                value={courseDraft.description}
+                onChange={(e) => updateCourseDraft('description', e.target.value)}
+                placeholder={t.home.courseDescriptionPlaceholder}
+              />
+
+              <fieldset className="home-page__visibility-group">
+                <legend className="home-page__modal-label">{t.home.visibilityLabel}</legend>
+                <label className="home-page__radio-option">
+                  <input
+                    type="radio"
+                    name="visibility"
+                    value="private"
+                    checked={courseDraft.visibility === 'private'}
+                    onChange={(e) => updateCourseDraft('visibility', e.target.value)}
+                  />
+                  <span>{t.home.visibilityPrivate}</span>
+                </label>
+                <label className="home-page__radio-option">
+                  <input
+                    type="radio"
+                    name="visibility"
+                    value="public"
+                    checked={courseDraft.visibility === 'public'}
+                    onChange={(e) => updateCourseDraft('visibility', e.target.value)}
+                  />
+                  <span>{t.home.visibilityPublic}</span>
+                </label>
+              </fieldset>
+
+              <div className="home-page__modal-actions">
+                <button
+                  type="button"
+                  className="home-page__modal-cancel"
+                  onClick={closeCreateCourseModal}
+                >
+                  {t.home.cancel}
+                </button>
+                <button type="submit" className="home-page__modal-submit">
+                  {t.home.saveCourse}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </main>
   )
 }
