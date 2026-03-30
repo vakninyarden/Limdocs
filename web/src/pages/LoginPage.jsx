@@ -18,6 +18,14 @@ const initialSignup = {
   password: '',
 }
 
+const signupRequirementMessages = {
+  fullName: 'חובה להזין שם מלא (לפחות 2 מילים).',
+  email: 'יש להזין כתובת אימייל תקינה (למשל: name@example.com).',
+  username: 'שם משתמש חייב להכיל לפחות 3 תווים, ללא רווחים.',
+  password:
+    'הסיסמה אינה עומדת בדרישות. עליה להכיל:\n • לפחות 8 תווים\n • אות גדולה (A-Z) ואות קטנה (a-z)\n • לפחות מספר אחד (0-9)\n • תו מיוחד (למשל: !, @, #, $)',
+}
+
 function Feedback({ feedback }) {
   if (!feedback) return null
   const className =
@@ -35,6 +43,7 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const [mode, setMode] = useState('login')
   const [login, setLogin] = useState(initialLogin)
+  const [loginErrors, setLoginErrors] = useState({})
   const [signup, setSignup] = useState(initialSignup)
   const [fieldErrors, setFieldErrors] = useState({})
   const [confirmCode, setConfirmCode] = useState('')
@@ -60,17 +69,25 @@ export default function LoginPage() {
 
   const goLogin = () => {
     setFeedback(null)
+    setLoginErrors({})
     setMode('login')
   }
 
   const goSignup = () => {
     setFeedback(null)
+    setLoginErrors({})
     setFieldErrors({})
     setMode('signup')
   }
 
   const updateLogin = (field, value) => {
     setLogin((prev) => ({ ...prev, [field]: value }))
+    setLoginErrors((prev) => {
+      if (!prev[field]) return prev
+      const next = { ...prev }
+      delete next[field]
+      return next
+    })
   }
 
   const updateSignup = (field, value) => {
@@ -83,34 +100,23 @@ export default function LoginPage() {
     })
   }
 
-  const getPasswordPolicyError = (message) => {
-    const text = String(message || '').toLowerCase()
-    if (text.includes('length') || text.includes('at least 8')) {
-      return 'הסיסמה חייבת להכיל לפחות 8 תווים'
-    }
-    if (text.includes('uppercase') || text.includes('upper case')) {
-      return 'הסיסמה חייבת לכלול לפחות אות גדולה אחת באנגלית'
-    }
-    if (text.includes('lowercase') || text.includes('lower case')) {
-      return 'הסיסמה חייבת לכלול לפחות אות קטנה אחת באנגלית'
-    }
-    if (text.includes('numeric') || text.includes('number')) {
-      return 'הסיסמה חייבת לכלול לפחות ספרה אחת'
-    }
-    if (text.includes('special') || text.includes('symbol')) {
-      return 'הסיסמה חייבת לכלול לפחות תו מיוחד אחד'
-    }
-    return 'הסיסמה לא עומדת בדרישות האבטחה'
-  }
-
   const handleLoginSubmit = async (e) => {
     e.preventDefault()
     setFeedback(null)
+    setLoginErrors({})
     const username = login.identifier.trim()
-    if (!username || !login.password) {
+    const nextLoginErrors = {}
+    if (!username) {
+      nextLoginErrors.identifier = 'יש להזין שם משתמש או אימייל.'
+    }
+    if (!login.password) {
+      nextLoginErrors.password = 'יש להזין סיסמה.'
+    }
+    if (Object.keys(nextLoginErrors).length > 0) {
+      setLoginErrors(nextLoginErrors)
       setFeedback({
         kind: 'error',
-        he: 'נא למלא שם משתמש/אימייל וסיסמה.',
+        he: 'יש למלא את השדות המסומנים באדום.',
       })
       return
     }
@@ -134,10 +140,25 @@ export default function LoginPage() {
         return
       }
       logAuthError('signIn', err)
-      setFeedback({
-        kind: 'error',
-        he: 'התחברות נכשלה. בדקו את הפרטים או נסו שוב מאוחר יותר.',
-      })
+      const errorName = err?.name ?? err?.code
+      if (errorName === 'UserNotFoundException') {
+        setLoginErrors({
+          identifier: 'שם המשתמש או האימייל אינם קיימים במערכת',
+        })
+      } else if (errorName === 'NotAuthorizedException') {
+        setLoginErrors({
+          password: 'הסיסמה שהזנת אינה נכונה. נסה שנית.',
+        })
+      } else if (errorName === 'UserNotConfirmedException') {
+        setLoginErrors({
+          identifier: 'חשבונך טרם אומת. בדוק את המייל לקוד אישור.',
+        })
+      } else {
+        setFeedback({
+          kind: 'error',
+          he: 'התחברות נכשלה. בדקו את הפרטים או נסו שוב מאוחר יותר.',
+        })
+      }
     } finally {
       setBusy(false)
     }
@@ -154,16 +175,30 @@ export default function LoginPage() {
     const password = signup.password
 
     const nextFieldErrors = {}
-    if (!firstName) nextFieldErrors.firstName = 'נא להזין שם פרטי'
-    if (!lastName) nextFieldErrors.lastName = 'נא להזין שם משפחה'
-    if (!email) nextFieldErrors.email = 'נא להזין כתובת אימייל'
-    if (!username) nextFieldErrors.username = 'נא להזין שם משתמש'
-    if (!password) nextFieldErrors.password = 'נא להזין סיסמה'
-    if (password && password.length < 8) {
-      nextFieldErrors.password = 'הסיסמה חייבת להכיל לפחות 8 תווים'
+    const fullName = `${firstName} ${lastName}`.trim()
+    const fullNameWords = fullName.split(/\s+/).filter(Boolean)
+    const hasValidFullName = fullNameWords.length >= 2
+    const hasValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+    const hasValidUsername = username.length >= 3 && !/\s/.test(username)
+    const hasValidPassword =
+      password.length >= 8 &&
+      /[A-Z]/.test(password) &&
+      /[a-z]/.test(password) &&
+      /\d/.test(password) &&
+      /[^A-Za-z0-9]/.test(password)
+
+    if (!hasValidFullName) {
+      nextFieldErrors.firstName = signupRequirementMessages.fullName
+      nextFieldErrors.lastName = signupRequirementMessages.fullName
     }
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      nextFieldErrors.email = 'כתובת אימייל לא תקינה'
+    if (!hasValidEmail) {
+      nextFieldErrors.email = signupRequirementMessages.email
+    }
+    if (!hasValidUsername) {
+      nextFieldErrors.username = signupRequirementMessages.username
+    }
+    if (!hasValidPassword) {
+      nextFieldErrors.password = signupRequirementMessages.password
     }
 
     if (Object.keys(nextFieldErrors).length > 0) {
@@ -220,14 +255,13 @@ export default function LoginPage() {
       fetch('http://127.0.0.1:7342/ingest/c12bd9e5-3c3e-438c-8677-68452c921326',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4bfbe0'},body:JSON.stringify({sessionId:'4bfbe0',runId:'signup-debug-1',hypothesisId:'H4',location:'src/pages/LoginPage.jsx:145',message:'signUp error caught',data:{errorName:err?.name||'unknown',errorCode:err?.code||'unknown',message:String(err?.message||'').slice(0,240),suggestion:err?.recoverySuggestion||''},timestamp:Date.now()})}).catch(()=>{});
       // #endregion
       const errorName = err?.name ?? err?.code
-      const errorMessage = String(err?.message ?? '')
       if (errorName === 'UsernameExistsException') {
-        setFieldErrors({ username: 'שם המשתמש כבר קיים במערכת' })
+        setFieldErrors({ username: signupRequirementMessages.username })
       } else if (errorName === 'InvalidParameterException') {
-        setFieldErrors({ email: 'כתובת אימייל לא תקינה' })
+        setFieldErrors({ email: signupRequirementMessages.email })
       } else if (errorName === 'InvalidPasswordException') {
         setFieldErrors({
-          password: getPasswordPolicyError(errorMessage),
+          password: signupRequirementMessages.password,
         })
       }
       setFeedback({ kind: 'error', he: 'הרשמה נכשלה. בדקו את השדות ונסו שוב.' })
@@ -300,7 +334,7 @@ export default function LoginPage() {
                 </label>
                 <input
                   id="login-identifier"
-                  className="login-page__input"
+                  className={`login-page__input ${loginErrors.identifier ? 'login-page__input--error' : ''}`}
                   type="text"
                   name="identifier"
                   autoComplete="username"
@@ -309,6 +343,21 @@ export default function LoginPage() {
                     updateLogin('identifier', e.target.value)
                   }
                 />
+                {loginErrors.identifier ? (
+                  <span className="field-error">{loginErrors.identifier}</span>
+                ) : null}
+                {loginErrors.identifier === 'חשבונך טרם אומת. בדוק את המייל לקוד אישור.' ? (
+                  <button
+                    type="button"
+                    className="login-page__link"
+                    onClick={() => {
+                      setPendingUsername(login.identifier.trim())
+                      setMode('confirm')
+                    }}
+                  >
+                    מעבר למסך אישור חשבון
+                  </button>
+                ) : null}
               </div>
               <div className="login-page__field">
                 <label className="login-page__label" htmlFor="login-password">
@@ -316,13 +365,16 @@ export default function LoginPage() {
                 </label>
                 <input
                   id="login-password"
-                  className="login-page__input"
+                  className={`login-page__input ${loginErrors.password ? 'login-page__input--error' : ''}`}
                   type="password"
                   name="password"
                   autoComplete="current-password"
                   value={login.password}
                   onChange={(e) => updateLogin('password', e.target.value)}
                 />
+                {loginErrors.password ? (
+                  <span className="field-error">{loginErrors.password}</span>
+                ) : null}
               </div>
               <button
                 type="submit"

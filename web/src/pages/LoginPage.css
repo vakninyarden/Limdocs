@@ -150,10 +150,14 @@
 
 .field-error {
   display: block;
-  margin-top: 0.35rem;
+  width: 100%;
+  margin-top: 0.45rem;
+  padding-inline-start: 0.1rem;
   color: #b91c1c;
-  font-size: 0.78rem;
-  line-height: 1.35;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
   text-align: right;
 }
 
