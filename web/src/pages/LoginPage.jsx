@@ -32,10 +32,10 @@ function Feedback({ feedback }) {
   )
 }
 
-export default function LoginPage() {
+export default function LoginPage({ initialMode = 'login' }) {
   const navigate = useNavigate()
   const { t, lang, setLang, dir } = useLanguageControl()
-  const [mode, setMode] = useState('login')
+  const [mode, setMode] = useState(initialMode)
   const [login, setLogin] = useState(initialLogin)
   const [loginErrors, setLoginErrors] = useState({})
   const [showConfirmLink, setShowConfirmLink] = useState(false)
@@ -53,6 +53,15 @@ export default function LoginPage() {
     setFieldErrors({})
     setShowConfirmLink(false)
   }, [lang])
+
+  useEffect(() => {
+    if (initialMode !== 'login' && initialMode !== 'signup') return
+    setMode(initialMode)
+    setFeedback(null)
+    setLoginErrors({})
+    setFieldErrors({})
+    setShowConfirmLink(false)
+  }, [initialMode])
 
   useEffect(() => {
     if (mode !== 'login' && mode !== 'signup') return
@@ -74,7 +83,7 @@ export default function LoginPage() {
     setFeedback(null)
     setLoginErrors({})
     setShowConfirmLink(false)
-    setMode('login')
+    navigate('/login')
   }
 
   const goSignup = () => {
@@ -82,7 +91,7 @@ export default function LoginPage() {
     setLoginErrors({})
     setFieldErrors({})
     setShowConfirmLink(false)
-    setMode('signup')
+    navigate('/register')
   }
 
   const updateLogin = (field, value) => {
