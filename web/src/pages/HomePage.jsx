@@ -8,6 +8,7 @@ import {
 } from 'aws-amplify/auth'
 import './HomePage.css'
 import { useLanguageControl } from '../language-control/LanguageControlProvider.jsx'
+import { getUserCourses } from '../services/coursesService.js'
 
 function logAuthError(context, error) {
   const message = error?.message ?? String(error)
@@ -23,6 +24,11 @@ export default function HomePage() {
   const [isCreateCourseOpen, setIsCreateCourseOpen] = useState(false)
   const [isCreatingCourse, setIsCreatingCourse] = useState(false)
   const [createCourseError, setCreateCourseError] = useState('')
+  const [currentUserId, setCurrentUserId] = useState('')
+  const [courses, setCourses] = useState([])
+  const [isCoursesLoading, setIsCoursesLoading] = useState(false)
+  const [coursesError, setCoursesError] = useState('')
+  const [coursesRefreshKey, setCoursesRefreshKey] = useState(0)
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? ''
   const [courseDraft, setCourseDraft] = useState({
     name: '',
@@ -47,6 +53,7 @@ export default function HomePage() {
           attrs.name ??
           attrs.preferred_username ??
           user.username
+        setCurrentUserId(String(user.userId ?? attrs.sub ?? '').trim())
         setDisplayName(String(name || user.username || '').trim() || 'Guest')
         setStatus('authed')
       } catch (e) {
@@ -58,6 +65,41 @@ export default function HomePage() {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      if (status !== 'authed' || !currentUserId) return
+
+      try {
+        setIsCoursesLoading(true)
+        setCoursesError('')
+
+        const session = await fetchAuthSession()
+        const idToken = session.tokens?.idToken?.toString()
+        if (!idToken) {
+          throw new Error('Missing authentication token.')
+        }
+
+        const items = await getUserCourses(currentUserId, idToken)
+        if (!cancelled) {
+          setCourses(Array.isArray(items) ? items : [])
+        }
+      } catch (error) {
+        console.error('[get-my-courses-failed]', error)
+        if (!cancelled) {
+          setCourses([])
+          setCoursesError(error?.message || 'Could not load your courses.')
+        }
+      } finally {
+        if (!cancelled) setIsCoursesLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentUserId, status, coursesRefreshKey])
 
   const handleLogout = async () => {
     try {
@@ -120,6 +162,7 @@ export default function HomePage() {
       }
 
       closeCreateCourseModal()
+      setCoursesRefreshKey((prev) => prev + 1)
     } catch (error) {
       console.error('[create-course-failed]', error)
       setCreateCourseError(error?.message || 'Could not create course.')
@@ -206,6 +249,44 @@ export default function HomePage() {
             {t.home.createCourse}
           </button>
         </div>
+        <section className="home-page__courses-section" aria-live="polite">
+          <header className="home-page__courses-header">
+            <h2 className="home-page__courses-title">{t.home.myCourses}</h2>
+          </header>
+
+          {isCoursesLoading ? (
+            <p className="home-page__courses-state">{t.home.coursesLoading}</p>
+          ) : null}
+
+          {!isCoursesLoading && coursesError ? (
+            <p className="home-page__courses-error" role="alert">
+              {t.home.coursesError}
+            </p>
+          ) : null}
+
+          {!isCoursesLoading && !coursesError && courses.length === 0 ? (
+            <p className="home-page__courses-state">{t.home.coursesEmpty}</p>
+          ) : null}
+
+          {!isCoursesLoading && !coursesError && courses.length > 0 ? (
+            <div className="home-page__courses-grid">
+              {courses.map((course) => {
+                const courseId = course.course_id ?? course.id ?? course.courseId ?? ''
+                const courseName = course.course_name ?? course.name ?? t.home.untitledCourse
+                return (
+                  <button
+                    type="button"
+                    key={String(courseId || courseName)}
+                    className="home-page__course-card"
+                    onClick={() => console.log('[open-course]', { courseId, course })}
+                  >
+                    <p className="home-page__course-name">{courseName}</p>
+                  </button>
+                )
+              })}
+            </div>
+          ) : null}
+        </section>
       </section>
       {isCreateCourseOpen ? (
         <div
