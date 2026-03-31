@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import {
   fetchUserAttributes,
+  fetchAuthSession,
   getCurrentUser,
   signOut,
 } from 'aws-amplify/auth'
@@ -20,6 +21,9 @@ export default function HomePage() {
   const [status, setStatus] = useState('loading')
   const [displayName, setDisplayName] = useState('')
   const [isCreateCourseOpen, setIsCreateCourseOpen] = useState(false)
+  const [isCreatingCourse, setIsCreatingCourse] = useState(false)
+  const [createCourseError, setCreateCourseError] = useState('')
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? ''
   const [courseDraft, setCourseDraft] = useState({
     name: '',
     description: '',
@@ -70,6 +74,7 @@ export default function HomePage() {
 
   const closeCreateCourseModal = () => {
     setIsCreateCourseOpen(false)
+    setCreateCourseError('')
     setCourseDraft({
       name: '',
       description: '',
@@ -77,10 +82,50 @@ export default function HomePage() {
     })
   }
 
-  const handleCreateCourseSubmit = (e) => {
+  const handleCreateCourseSubmit = async (e) => {
     e.preventDefault()
-    console.log('[create-course-draft]', courseDraft)
-    closeCreateCourseModal()
+    setCreateCourseError('')
+
+    if (!apiBaseUrl) {
+      setCreateCourseError('API is not configured. Missing VITE_API_BASE_URL.')
+      return
+    }
+
+    try {
+      setIsCreatingCourse(true)
+      const session = await fetchAuthSession()
+      const accessToken = session.tokens?.idToken?.toString()
+
+      if (!accessToken) {
+        setCreateCourseError('You are not authenticated. Please sign in again.')
+        return
+      }
+
+      const response = await fetch(`${apiBaseUrl}/courses`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          course_name: courseDraft.name.trim(),
+          description: courseDraft.description.trim(),
+          is_public: courseDraft.visibility === 'public',
+        }),
+      })
+
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(payload?.message || `Failed with status ${response.status}`)
+      }
+
+      closeCreateCourseModal()
+    } catch (error) {
+      console.error('[create-course-failed]', error)
+      setCreateCourseError(error?.message || 'Could not create course.')
+    } finally {
+      setIsCreatingCourse(false)
+    }
   }
 
   if (status === 'loading') {
@@ -230,14 +275,20 @@ export default function HomePage() {
                 <button
                   type="button"
                   className="home-page__modal-cancel"
+                  disabled={isCreatingCourse}
                   onClick={closeCreateCourseModal}
                 >
                   {t.home.cancel}
                 </button>
-                <button type="submit" className="home-page__modal-submit">
-                  {t.home.saveCourse}
+                <button type="submit" className="home-page__modal-submit" disabled={isCreatingCourse}>
+                  {isCreatingCourse ? 'Creating...' : t.home.saveCourse}
                 </button>
               </div>
+              {createCourseError ? (
+                <p className="home-page__modal-error" role="alert">
+                  {createCourseError}
+                </p>
+              ) : null}
             </form>
           </section>
         </div>

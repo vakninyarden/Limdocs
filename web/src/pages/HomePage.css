@@ -334,6 +334,19 @@
   filter: brightness(1.03);
 }
 
+.home-page__modal-submit:disabled,
+.home-page__modal-cancel:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  filter: none;
+}
+
+.home-page__modal-error {
+  margin: 0.2rem 0 0;
+  color: #b91c1c;
+  font-size: 0.86rem;
+}
+
 @media (max-width: 860px) {
   .home-page {
     flex-direction: column;
