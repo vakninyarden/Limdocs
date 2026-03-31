@@ -43,9 +43,9 @@ export default function HomePage() {
         }
         if (cancelled) return
         const name =
+          attrs.given_name ??
           attrs.name ??
           attrs.preferred_username ??
-          attrs.email ??
           user.username
         setDisplayName(String(name || user.username || '').trim() || 'Guest')
         setStatus('authed')
