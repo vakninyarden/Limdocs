@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { confirmSignUp, getCurrentUser, signIn, signUp } from 'aws-amplify/auth'
+import {
+  confirmSignUp,
+  fetchAuthSession,
+  getCurrentUser,
+  signIn,
+  signUp,
+} from 'aws-amplify/auth'
 import './LoginPage.css'
 import { useLanguageControl } from '../language-control/LanguageControlProvider.jsx'
 
@@ -18,6 +24,10 @@ const initialSignup = {
   username: '',
   password: '',
 }
+
+const apiBaseUrl = import.meta.env.VITE_API_URL ?? ''
+const USER_SYNC_PENDING_KEY = 'limdocs:userSyncPending'
+const USER_SYNC_DONE_PREFIX = 'limdocs:userSyncDone:'
 
 function Feedback({ feedback }) {
   if (!feedback) return null
@@ -47,6 +57,79 @@ export default function LoginPage({ initialMode = 'login' }) {
   const [feedback, setFeedback] = useState(null)
   const signupRequirementMessages = t.login.requirements
 
+  const setPendingUserSync = (payload) => {
+    sessionStorage.setItem(USER_SYNC_PENDING_KEY, JSON.stringify(payload))
+  }
+
+  const getPendingUserSync = () => {
+    const raw = sessionStorage.getItem(USER_SYNC_PENDING_KEY)
+    if (!raw) return null
+    try {
+      return JSON.parse(raw)
+    } catch {
+      return null
+    }
+  }
+
+  const clearPendingUserSync = () => {
+    sessionStorage.removeItem(USER_SYNC_PENDING_KEY)
+  }
+
+  const isUserSynced = (sub) =>
+    !!localStorage.getItem(`${USER_SYNC_DONE_PREFIX}${sub}`)
+
+  const markUserSynced = (sub) => {
+    localStorage.setItem(`${USER_SYNC_DONE_PREFIX}${sub}`, '1')
+  }
+
+  const syncUserAfterRegistration = async () => {
+    if (!apiBaseUrl) return
+    const pending = getPendingUserSync()
+    if (!pending) return
+
+    const session = await fetchAuthSession()
+    const idToken = session?.tokens?.idToken?.toString()
+    const claims = session?.tokens?.idToken?.payload ?? {}
+    const sub = claims?.sub
+    if (!idToken || !sub) return
+
+    if (isUserSynced(sub)) {
+      clearPendingUserSync()
+      return
+    }
+
+    const email = claims.email ?? pending.email ?? ''
+    const username = claims['cognito:username'] ?? pending.username ?? ''
+    const first_name = claims.given_name ?? pending.first_name ?? ''
+    const last_name = claims.family_name ?? pending.last_name ?? ''
+
+    if (!email || !username || !first_name || !last_name) {
+      throw new Error('Missing required user fields for /users sync')
+    }
+
+    const response = await fetch(`${apiBaseUrl}/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({
+        email,
+        username,
+        first_name,
+        last_name,
+      }),
+    })
+
+    if (!response.ok) {
+      const text = await response.text()
+      throw new Error(`User sync failed (${response.status}): ${text}`)
+    }
+
+    markUserSynced(sub)
+    clearPendingUserSync()
+  }
+
   useEffect(() => {
     setFeedback(null)
     setLoginErrors({})
@@ -69,6 +152,9 @@ export default function LoginPage({ initialMode = 'login' }) {
     ;(async () => {
       try {
         await getCurrentUser()
+        await syncUserAfterRegistration().catch((error) => {
+          logAuthError('syncUserAfterRegistration on session restore', error)
+        })
         if (!cancelled) navigate('/home', { replace: true })
       } catch {
         /* no session */
@@ -142,6 +228,9 @@ export default function LoginPage({ initialMode = 'login' }) {
       const signInDone =
         out.isSignedIn || out.nextStep?.signInStep === 'DONE'
       if (signInDone) {
+        await syncUserAfterRegistration().catch((error) => {
+          logAuthError('syncUserAfterRegistration after signIn', error)
+        })
         navigate('/home', { replace: true })
         return
       }
@@ -152,6 +241,12 @@ export default function LoginPage({ initialMode = 'login' }) {
       })
     } catch (err) {
       if (err?.name === 'UserAlreadyAuthenticatedException') {
+        await syncUserAfterRegistration().catch((error) => {
+          logAuthError(
+            'syncUserAfterRegistration after already-authenticated signIn',
+            error,
+          )
+        })
         navigate('/home', { replace: true })
         return
       }
@@ -227,9 +322,6 @@ export default function LoginPage({ initialMode = 'login' }) {
       return
     }
     setBusy(true)
-    // #region agent log
-    fetch('http://127.0.0.1:7342/ingest/c12bd9e5-3c3e-438c-8677-68452c921326',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4bfbe0'},body:JSON.stringify({sessionId:'4bfbe0',runId:'signup-debug-1',hypothesisId:'H2',location:'src/pages/LoginPage.jsx:104',message:'signUp submit payload summary',data:{usernameLength:username.length,emailDomain:(email.split('@')[1]||'').toLowerCase(),firstNameLength:firstName.length,lastNameLength:lastName.length,passwordLength:password.length,isOnline:navigator.onLine},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     try {
       const out = await signUp({
         username,
@@ -243,10 +335,13 @@ export default function LoginPage({ initialMode = 'login' }) {
         },
       })
       const step = out.nextStep?.signUpStep
-      // #region agent log
-      fetch('http://127.0.0.1:7342/ingest/c12bd9e5-3c3e-438c-8677-68452c921326',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4bfbe0'},body:JSON.stringify({sessionId:'4bfbe0',runId:'signup-debug-1',hypothesisId:'H3',location:'src/pages/LoginPage.jsx:117',message:'signUp response received',data:{isSignUpComplete:Boolean(out.isSignUpComplete),signUpStep:step||'none',codeDeliveryMedium:out.nextStep?.codeDeliveryDetails?.deliveryMedium||'none'},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (step === 'CONFIRM_SIGN_UP') {
+        setPendingUserSync({
+          email,
+          username,
+          first_name: firstName,
+          last_name: lastName,
+        })
         setPendingUsername(username)
         setConfirmCode('')
         setMode('confirm')
@@ -257,6 +352,12 @@ export default function LoginPage({ initialMode = 'login' }) {
         return
       }
       if (out.isSignUpComplete) {
+        setPendingUserSync({
+          email,
+          username,
+          first_name: firstName,
+          last_name: lastName,
+        })
         setFeedback({
           kind: 'success',
           message: t.login.signUpComplete,
@@ -271,9 +372,6 @@ export default function LoginPage({ initialMode = 'login' }) {
       })
     } catch (err) {
       logAuthError('signUp', err)
-      // #region agent log
-      fetch('http://127.0.0.1:7342/ingest/c12bd9e5-3c3e-438c-8677-68452c921326',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4bfbe0'},body:JSON.stringify({sessionId:'4bfbe0',runId:'signup-debug-1',hypothesisId:'H4',location:'src/pages/LoginPage.jsx:145',message:'signUp error caught',data:{errorName:err?.name||'unknown',errorCode:err?.code||'unknown',message:String(err?.message||'').slice(0,240),suggestion:err?.recoverySuggestion||''},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       const errorName = err?.name ?? err?.code
       if (errorName === 'UsernameExistsException') {
         setFieldErrors({ username: signupRequirementMessages.username })

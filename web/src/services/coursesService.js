@@ -1,10 +1,10 @@
 import axios from 'axios'
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? ''
+const apiBaseUrl = import.meta.env.VITE_API_URL ?? ''
 
 export async function getUserCourses(userId, idToken) {
   if (!apiBaseUrl) {
-    throw new Error('API is not configured. Missing VITE_API_BASE_URL.')
+    throw new Error('API is not configured. Set VITE_API_URL.')
   }
   if (!userId) {
     throw new Error('Missing userId.')

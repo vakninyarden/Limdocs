@@ -29,7 +29,7 @@ export default function HomePage() {
   const [isCoursesLoading, setIsCoursesLoading] = useState(false)
   const [coursesError, setCoursesError] = useState('')
   const [coursesRefreshKey, setCoursesRefreshKey] = useState(0)
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? ''
+  const apiBaseUrl = import.meta.env.VITE_API_URL ?? ''
   const [courseDraft, setCourseDraft] = useState({
     name: '',
     description: '',
@@ -129,7 +129,7 @@ export default function HomePage() {
     setCreateCourseError('')
 
     if (!apiBaseUrl) {
-      setCreateCourseError('API is not configured. Missing VITE_API_BASE_URL.')
+      setCreateCourseError('API is not configured. Set VITE_API_URL.')
       return
     }
 
@@ -272,7 +272,8 @@ export default function HomePage() {
             <div className="home-page__courses-grid">
               {courses.map((course) => {
                 const courseId = course.course_id ?? course.id ?? course.courseId ?? ''
-                const courseName = course.course_name ?? course.name ?? t.home.untitledCourse
+                const courseName =
+                  course.course_name ?? course.name ?? t.home.untitledCourse
                 return (
                   <button
                     type="button"
