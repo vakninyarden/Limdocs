@@ -1,0 +1,171 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Limdocs backend stack (Cognito, DynamoDB, API, Lambda)
+
+Resources:
+  LimdocsUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: Limdocs-UserPool
+      AliasAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+
+  LimdocsWebClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: Limdocs-Web-Client
+      UserPoolId: !Ref LimdocsUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+  LimdocsUsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: users
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+
+  LimdocsCoursesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: courses
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: course_id
+          AttributeType: S
+        - AttributeName: owner_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: course_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: owner_courses_index
+          KeySchema:
+            - AttributeName: owner_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  LimdocsApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: LimdocsApi
+      StageName: prod
+      Cors:
+        AllowOrigin: "'*'"
+        AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+        AllowMethods: "'OPTIONS,GET,POST,PUT,DELETE'"
+      Auth:
+        DefaultAuthorizer: LimdocsAuth
+        AddDefaultAuthorizerToCorsPreflight: false
+        Authorizers:
+          LimdocsAuth:
+            UserPoolArn: !GetAtt LimdocsUserPool.Arn
+
+  CreateUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: create_user.lambda_handler
+      Runtime: python3.9
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Environment:
+        Variables:
+          USERS_TABLE: !Ref LimdocsUsersTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref LimdocsApi
+            Path: /users
+            Method: post
+
+  CreateCourseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: create_course.lambda_handler
+      Runtime: python3.9
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Environment:
+        Variables:
+          COURSES_TABLE: !Ref LimdocsCoursesTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref LimdocsApi
+            Path: /courses
+            Method: post
+
+  GetCoursesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: get_courses.lambda_handler
+      Runtime: python3.9
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Environment:
+        Variables:
+          COURSES_TABLE: !Ref LimdocsCoursesTable
+          INDEX_NAME: owner_courses_index
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref LimdocsApi
+            Path: /users/{userId}/courses
+            Method: get
+
+Outputs:
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref LimdocsUserPool
+
+  UserPoolArn:
+    Description: Cognito User Pool ARN
+    Value: !GetAtt LimdocsUserPool.Arn
+
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref LimdocsWebClient
+
+  UsersTableName:
+    Description: Users DynamoDB table name
+    Value: !Ref LimdocsUsersTable
+
+  UsersTableArn:
+    Description: Users DynamoDB table ARN
+    Value: !GetAtt LimdocsUsersTable.Arn
+
+  CoursesTableName:
+    Description: Courses DynamoDB table name
+    Value: !Ref LimdocsCoursesTable
+
+  CoursesTableArn:
+    Description: Courses DynamoDB table ARN
+    Value: !GetAtt LimdocsCoursesTable.Arn
+
+  ApiUrl:
+    Description: Base URL for Limdocs API
+    Value: !Sub "https://${LimdocsApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
