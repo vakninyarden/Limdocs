@@ -81,6 +81,15 @@ export const languageContent = {
       saveCourse: 'יצירת קורס',
       brandName: 'Limdocs',
     },
+    coursePage: {
+      loading: 'טוען…',
+      backToDashboard: 'חזרה לדאשבורד',
+      materialsCountStat: '{count} חומרי לימוד',
+      uploadMaterial: 'העלאת חומר',
+      materialsSectionLabel: 'חומרי הקורס',
+      materialsHeading: 'חומרים',
+      materialsEmpty: 'עדיין לא הועלו חומרים.',
+    },
   },
   en: {
     common: {
@@ -166,6 +175,15 @@ export const languageContent = {
       cancel: 'Cancel',
       saveCourse: 'Create Course',
       brandName: 'Limdocs',
+    },
+    coursePage: {
+      loading: 'Loading…',
+      backToDashboard: 'Back to dashboard',
+      materialsCountStat: '{count} learning materials',
+      uploadMaterial: 'Upload material',
+      materialsSectionLabel: 'Course materials',
+      materialsHeading: 'Materials',
+      materialsEmpty: 'No materials uploaded yet.',
     },
   },
 }

@@ -279,7 +279,12 @@ export default function HomePage() {
                     type="button"
                     key={String(courseId || courseName)}
                     className="home-page__course-card"
-                    onClick={() => console.log('[open-course]', { courseId, course })}
+                    onClick={() => {
+                      if (!courseId) return
+                      navigate(`/course/${encodeURIComponent(String(courseId))}`, {
+                        state: { courseName },
+                      })
+                    }}
                   >
                     <p className="home-page__course-name">{courseName}</p>
                   </button>

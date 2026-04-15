@@ -1,6 +1,7 @@
 import { Navigate, Routes, Route } from 'react-router-dom'
 import LoginPage from './pages/LoginPage.jsx'
 import HomePage from './pages/HomePage.jsx'
+import CoursePage from './pages/CoursePage.jsx'
 
 function App() {
   return (
@@ -9,6 +10,7 @@ function App() {
       <Route path="/login" element={<LoginPage initialMode="login" />} />
       <Route path="/register" element={<LoginPage initialMode="signup" />} />
       <Route path="/home" element={<HomePage />} />
+      <Route path="/course/:courseId" element={<CoursePage />} />
     </Routes>
   )
 }
