@@ -69,6 +69,8 @@ Resources:
   RawUploadsBucket:
     Type: AWS::S3::Bucket
     Properties:
+      # Stable, readable name (account-scoped uniqueness for the global S3 namespace)
+      BucketName: !Sub "limdocs-raw-uploads-${AWS::AccountId}"
       CorsConfiguration:
         CorsRules:
           - AllowedHeaders:
@@ -121,6 +123,7 @@ Resources:
   CreateUserFunction:
     Type: AWS::Serverless::Function
     Properties:
+      FunctionName: limdocs-create-user
       CodeUri: src/
       Handler: create_user.lambda_handler
       Runtime: python3.9
@@ -139,6 +142,7 @@ Resources:
   CreateCourseFunction:
     Type: AWS::Serverless::Function
     Properties:
+      FunctionName: limdocs-create-course
       CodeUri: src/
       Handler: create_course.lambda_handler
       Runtime: python3.9
@@ -157,6 +161,7 @@ Resources:
   GetCoursesFunction:
     Type: AWS::Serverless::Function
     Properties:
+      FunctionName: limdocs-get-courses
       CodeUri: src/
       Handler: get_courses.lambda_handler
       Runtime: python3.9
