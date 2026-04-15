@@ -109,6 +109,26 @@ function IconChevronEnd() {
   )
 }
 
+function IconPlus() {
+  return (
+    <svg
+      className="home-page__course-icon home-page__course-icon--plus"
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      aria-hidden
+    >
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        d="M12 5v14M5 12h14"
+      />
+    </svg>
+  )
+}
+
 function logAuthError(context, error) {
   const message = error?.message ?? String(error)
   const name = error?.name ?? error?.code
@@ -340,13 +360,6 @@ export default function HomePage() {
             </h1>
             <p className="home-page__subtext">{t.home.subtext}</p>
           </div>
-          <button
-            type="button"
-            className="home-page__primary-action"
-            onClick={() => setIsCreateCourseOpen(true)}
-          >
-            {t.home.createCourse}
-          </button>
         </div>
         <section className="home-page__courses-section" aria-live="polite">
           <header className="home-page__courses-header">
@@ -363,11 +376,7 @@ export default function HomePage() {
             </p>
           ) : null}
 
-          {!isCoursesLoading && !coursesError && courses.length === 0 ? (
-            <p className="home-page__courses-state">{t.home.coursesEmpty}</p>
-          ) : null}
-
-          {!isCoursesLoading && !coursesError && courses.length > 0 ? (
+          {!isCoursesLoading && !coursesError ? (
             <ul className="home-page__courses-grid">
               {courses.map((course) => {
                 const courseId = course.course_id ?? course.id ?? course.courseId ?? ''
@@ -396,6 +405,20 @@ export default function HomePage() {
                   </li>
                 )
               })}
+              <li className="home-page__courses-grid-item">
+                <button
+                  type="button"
+                  className="home-page__course-card home-page__course-card--create"
+                  onClick={() => setIsCreateCourseOpen(true)}
+                >
+                  <span className="home-page__course-card-icon-wrap home-page__course-card-icon-wrap--create" aria-hidden>
+                    <IconPlus />
+                  </span>
+                  <span className="home-page__course-card-text">
+                    <span className="home-page__course-name home-page__course-name--create">{t.home.createCourse}</span>
+                  </span>
+                </button>
+              </li>
             </ul>
           ) : null}
         </section>

@@ -214,11 +214,6 @@
   border-bottom: var(--border-hairline);
   padding: 0 0 clamp(1.5rem, 3vw, 2rem);
   margin-bottom: clamp(1.5rem, 3vw, 2.25rem);
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1.25rem;
-  flex-wrap: wrap;
 }
 
 .home-page__eyebrow {
@@ -237,43 +232,6 @@
   line-height: 1.55;
   text-align: start;
   font-size: 0.98rem;
-}
-
-.home-page__primary-action {
-  border: none;
-  border-radius: 999px;
-  padding: 0.8rem 1.4rem;
-  min-width: 160px;
-  font-size: 0.95rem;
-  font-weight: 600;
-  font-family: inherit;
-  color: #fff;
-  background: var(--brand-blue);
-  cursor: pointer;
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.06),
-    0 12px 32px -10px rgba(0, 122, 255, 0.4);
-  transition:
-    filter 0.2s ease,
-    box-shadow 0.2s ease,
-    transform 0.2s ease;
-}
-
-.home-page__primary-action:hover {
-  filter: brightness(1.05);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.06),
-    0 18px 40px -12px rgba(0, 122, 255, 0.45);
-  transform: translateY(-1px);
-}
-
-.home-page__primary-action:active {
-  transform: translateY(0);
-}
-
-.home-page__primary-action:focus-visible {
-  outline: 2px solid var(--brand-blue);
-  outline-offset: 3px;
 }
 
 .home-page__courses-section {
@@ -360,6 +318,45 @@
 }
 
 .home-page__course-card:focus-visible {
+  outline: 2px solid var(--brand-blue);
+  outline-offset: 2px;
+}
+
+/* Create-course tile: same shell as course cards, blue action affordance */
+.home-page__course-card--create {
+  border-style: dashed;
+  border-color: rgba(0, 122, 255, 0.28);
+  justify-content: flex-start;
+}
+
+.home-page__course-card--create:hover {
+  background: var(--active-bg-tint);
+  border-color: rgba(0, 122, 255, 0.45);
+  border-style: dashed;
+}
+
+.home-page__course-card-icon-wrap--create {
+  background: transparent;
+  border: 1px dashed rgba(0, 122, 255, 0.35);
+  color: var(--brand-blue);
+}
+
+.home-page__course-card--create:hover .home-page__course-card-icon-wrap--create {
+  border-color: rgba(0, 122, 255, 0.55);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.home-page__course-icon--plus {
+  display: block;
+}
+
+.home-page__course-name--create {
+  color: var(--brand-blue);
+  font-weight: 600;
+  -webkit-line-clamp: 3;
+}
+
+.home-page__course-card--create:focus-visible {
   outline: 2px solid var(--brand-blue);
   outline-offset: 2px;
 }
@@ -589,11 +586,6 @@
   .home-page__logout {
     justify-content: center;
     text-align: center;
-  }
-
-  .home-page__welcome-panel {
-    flex-direction: column;
-    align-items: flex-start;
   }
 
   .home-page__modal-actions {
