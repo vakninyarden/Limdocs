@@ -66,6 +66,42 @@ Resources:
           Projection:
             ProjectionType: ALL
 
+  RawUploadsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - Authorization
+              - Content-Type
+            AllowedMethods:
+              - GET
+              - PUT
+              - POST
+            AllowedOrigins:
+              - "*"
+
+  DocumentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: documents
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: document_id
+          AttributeType: S
+        - AttributeName: course_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: document_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: CourseIdIndex
+          KeySchema:
+            - AttributeName: course_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
   LimdocsApi:
     Type: AWS::Serverless::Api
     Properties:
@@ -169,3 +205,11 @@ Outputs:
   ApiUrl:
     Description: Base URL for Limdocs API
     Value: !Sub "https://${LimdocsApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+
+  RawUploadsBucketName:
+    Description: S3 bucket name for raw document uploads (pre-signed URL target)
+    Value: !Ref RawUploadsBucket
+
+  DocumentsTableName:
+    Description: DynamoDB table name for document metadata
+    Value: !Ref DocumentsTable
