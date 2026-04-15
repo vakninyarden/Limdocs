@@ -10,6 +10,105 @@ import './HomePage.css'
 import { useLanguageControl } from '../language-control/LanguageControlProvider.jsx'
 import { getUserCourses } from '../services/coursesService.js'
 
+function IconHome() {
+  return (
+    <svg className="home-page__nav-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden>
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3 10.25 12 3l9 7.25V20a.75.75 0 01-.75.75h-4.5v-6h-3v6H3.75A.75.75 0 013 20v-9.75z"
+      />
+    </svg>
+  )
+}
+
+function IconBooks() {
+  return (
+    <svg className="home-page__nav-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden>
+      <circle cx="4" cy="6" r="1.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="4" cy="12" r="1.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="4" cy="18" r="1.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        d="M8 6h13M8 12h13M8 18h10"
+      />
+    </svg>
+  )
+}
+
+function IconUser() {
+  return (
+    <svg className="home-page__nav-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden>
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"
+      />
+      <circle cx="12" cy="7" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  )
+}
+
+function IconLogout() {
+  return (
+    <svg className="home-page__nav-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden>
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M15 12H4m11 0l-3-3m3 3l-3 3M8 5V4a1 1 0 011-1h9a1 1 0 011 1v16a1 1 0 01-1 1H9a1 1 0 01-1-1v-1"
+      />
+    </svg>
+  )
+}
+
+function IconFolder() {
+  return (
+    <svg className="home-page__course-icon" width="22" height="22" viewBox="0 0 24 24" aria-hidden>
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3 7.5V18a1.5 1.5 0 001.5 1.5h15A1.5 1.5 0 0021 18V9a1.5 1.5 0 00-1.5-1.5h-6.379a1.5 1.5 0 01-1.06-.439l-1.122-1.122A1.5 1.5 0 009.879 5.5H4.5A1.5 1.5 0 003 7v.5z"
+      />
+    </svg>
+  )
+}
+
+function IconChevronEnd() {
+  return (
+    <svg
+      className="home-page__course-chevron"
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      aria-hidden
+    >
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M9 6l6 6-6 6"
+      />
+    </svg>
+  )
+}
+
 function logAuthError(context, error) {
   const message = error?.message ?? String(error)
   const name = error?.name ?? error?.code
@@ -197,21 +296,21 @@ export default function HomePage() {
 
         <nav className="home-page__menu">
           <button type="button" className="home-page__menu-item home-page__menu-item--active">
-            <span aria-hidden>🏠</span>
+            <IconHome />
             <span>{t.home.dashboard}</span>
           </button>
           <button type="button" className="home-page__menu-item">
-            <span aria-hidden>📚</span>
+            <IconBooks />
             <span>{t.home.myCourses}</span>
           </button>
           <button type="button" className="home-page__menu-item">
-            <span aria-hidden>👤</span>
+            <IconUser />
             <span>{t.home.profile}</span>
           </button>
         </nav>
 
         <button type="button" className="home-page__logout" onClick={handleLogout}>
-          <span aria-hidden>↩</span>
+          <IconLogout />
           <span>{t.home.logout}</span>
         </button>
       </aside>
@@ -269,28 +368,35 @@ export default function HomePage() {
           ) : null}
 
           {!isCoursesLoading && !coursesError && courses.length > 0 ? (
-            <div className="home-page__courses-grid">
+            <ul className="home-page__courses-grid">
               {courses.map((course) => {
                 const courseId = course.course_id ?? course.id ?? course.courseId ?? ''
                 const courseName =
                   course.course_name ?? course.name ?? t.home.untitledCourse
                 return (
-                  <button
-                    type="button"
-                    key={String(courseId || courseName)}
-                    className="home-page__course-card"
-                    onClick={() => {
-                      if (!courseId) return
-                      navigate(`/course/${encodeURIComponent(String(courseId))}`, {
-                        state: { courseName },
-                      })
-                    }}
-                  >
-                    <p className="home-page__course-name">{courseName}</p>
-                  </button>
+                  <li key={String(courseId || courseName)} className="home-page__courses-grid-item">
+                    <button
+                      type="button"
+                      className="home-page__course-card"
+                      onClick={() => {
+                        if (!courseId) return
+                        navigate(`/course/${encodeURIComponent(String(courseId))}`, {
+                          state: { courseName },
+                        })
+                      }}
+                    >
+                      <span className="home-page__course-card-icon-wrap" aria-hidden>
+                        <IconFolder />
+                      </span>
+                      <span className="home-page__course-card-text">
+                        <span className="home-page__course-name">{courseName}</span>
+                      </span>
+                      <IconChevronEnd />
+                    </button>
+                  </li>
                 )
               })}
-            </div>
+            </ul>
           ) : null}
         </section>
       </section>

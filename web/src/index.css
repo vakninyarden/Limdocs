@@ -1,25 +1,38 @@
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
+  /* Design system — Limdocs premium minimalist */
+  --brand-blue: #007aff;
+  --active-bg-tint: #e8f4ff;
+  --text-primary: #0f172a;
+  --text-secondary: #64748b;
+  --surface-page: #fafafa;
+  --surface-elevated: #ffffff;
+  --border-hairline: 1px solid #e5e7eb;
+  --shadow-diffused: 0 24px 48px -12px rgba(15, 23, 42, 0.08);
+
+  /* Legacy / shared aliases */
+  --text: var(--text-secondary);
+  --text-h: var(--text-primary);
+  --bg: var(--surface-elevated);
   --border: #e5e4e7;
   --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
+  --accent: var(--brand-blue);
+  --accent-bg: rgba(0, 122, 255, 0.1);
+  --accent-border: rgba(0, 122, 255, 0.45);
   --social-bg: rgba(244, 243, 236, 0.5);
   --shadow:
     rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  --sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --heading: var(--sans);
+  --mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
 
   font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
+  letter-spacing: 0.01em;
+  /* Light palette only: OS dark mode was flipping surfaces while Home sidebar stayed light — mismatch. */
+  color-scheme: light;
+  color: var(--text-secondary);
+  background: var(--surface-page);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -30,28 +43,11 @@
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
-}
-
 body {
   margin: 0;
+  font-family: var(--sans);
+  color: var(--text-secondary);
+  background: var(--surface-page);
 }
 
 #root {
@@ -65,14 +61,15 @@ body {
 h1,
 h2 {
   font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 h1 {
   font-size: 56px;
-  letter-spacing: -1.68px;
+  letter-spacing: -0.03em;
   margin: 32px 0;
+  font-weight: 700;
   @media (max-width: 1024px) {
     font-size: 36px;
     margin: 20px 0;
@@ -81,7 +78,7 @@ h1 {
 h2 {
   font-size: 24px;
   line-height: 118%;
-  letter-spacing: -0.24px;
+  letter-spacing: -0.02em;
   margin: 0 0 8px;
   @media (max-width: 1024px) {
     font-size: 20px;
@@ -96,7 +93,7 @@ code,
   font-family: var(--mono);
   display: inline-flex;
   border-radius: 4px;
-  color: var(--text-h);
+  color: var(--text-primary);
 }
 
 code {
