@@ -178,6 +178,46 @@ Resources:
             Path: /users/{userId}/courses
             Method: get
 
+  GenerateUploadUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: limdocs-generate-upload-url
+      CodeUri: src/
+      Handler: generate_upload_url.lambda_handler
+      Runtime: python3.9
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Environment:
+        Variables:
+          DOCUMENTS_TABLE: !Ref DocumentsTable
+          UPLOAD_BUCKET: !Ref RawUploadsBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref LimdocsApi
+            Path: /courses/{courseId}/upload-url
+            Method: post
+
+  GetCourseDocumentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: limdocs-get-course-documents
+      CodeUri: src/
+      Handler: get_course_documents.lambda_handler
+      Runtime: python3.9
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Environment:
+        Variables:
+          DOCUMENTS_TABLE: !Ref DocumentsTable
+          INDEX_NAME: CourseIdIndex
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref LimdocsApi
+            Path: /courses/{courseId}/documents
+            Method: get
+
 Outputs:
   UserPoolId:
     Description: Cognito User Pool ID

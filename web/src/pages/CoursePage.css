@@ -160,12 +160,87 @@
   color: var(--text-secondary);
 }
 
-.course-page__toolbar {
+.course-page__body {
   display: flex;
-  justify-content: flex-start;
+  flex-direction: row;
+  align-items: stretch;
   width: 100%;
   max-width: 960px;
   margin: 1.85rem auto 0;
+  min-height: min(58svh, 680px);
+  background: var(--surface-elevated);
+  border-radius: 20px;
+  border: var(--border-hairline);
+  box-shadow: var(--shadow-diffused);
+  overflow: hidden;
+}
+
+.course-page__inner-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  padding: 1rem 0.85rem;
+  box-sizing: border-box;
+  background: color-mix(in srgb, var(--surface-page) 88%, transparent);
+  border-inline-end: var(--border-hairline);
+}
+
+.course-page__inner-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.course-page__inner-nav-item {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 0.65rem 0.95rem;
+  width: 100%;
+  text-align: start;
+  font-family: inherit;
+  font-size: 0.92rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.course-page__inner-nav-item:hover {
+  color: var(--text-primary);
+  background: var(--active-bg-tint);
+}
+
+.course-page__inner-nav-item--active {
+  color: var(--brand-blue);
+  font-weight: 600;
+  background: var(--active-bg-tint);
+}
+
+.course-page__inner-nav-item:focus-visible {
+  outline: 2px solid var(--brand-blue);
+  outline-offset: 2px;
+}
+
+.course-page__main {
+  flex: 1;
+  min-width: 0;
+  padding: 1.35rem 1.35rem 1.65rem;
+  box-sizing: border-box;
+}
+
+.course-page__materials-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  margin-bottom: 1.15rem;
+}
+
+.course-page__materials-heading--panel {
+  margin: 0;
 }
 
 .course-page__upload-btn {
@@ -204,12 +279,6 @@
   outline-offset: 3px;
 }
 
-.course-page__materials-section {
-  max-width: 960px;
-  margin: 2.1rem auto 0;
-  padding-top: 0.25rem;
-}
-
 .course-page__materials-heading {
   margin: 0 0 0.75rem;
   font-size: 1.125rem;
@@ -224,6 +293,143 @@
   line-height: 1.55;
   color: var(--text-secondary);
   font-weight: 400;
+}
+
+.course-page__documents-state {
+  margin: 0.35rem 0 0;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.course-page__documents-error {
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #991b1b;
+  background: rgba(185, 28, 28, 0.06);
+  border: 1px solid rgba(185, 28, 28, 0.22);
+}
+
+.course-page__documents-skeleton {
+  margin-bottom: 0.5rem;
+}
+
+.course-page__documents-skeleton-row {
+  height: 3.25rem;
+  border-radius: 14px;
+  margin-bottom: 0.65rem;
+  background: linear-gradient(
+    90deg,
+    var(--surface-page) 0%,
+    color-mix(in srgb, var(--surface-elevated) 70%, var(--surface-page)) 50%,
+    var(--surface-page) 100%
+  );
+  background-size: 200% 100%;
+  animation: course-page-shimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes course-page-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+.course-page__doc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.course-page__doc-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+  padding: 1rem 1.1rem;
+  border-radius: 16px;
+  background: var(--surface-page);
+  border: var(--border-hairline);
+  box-shadow: var(--shadow-diffused);
+  transition:
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+}
+
+.course-page__doc-card:hover {
+  box-shadow:
+    0 20px 44px -20px rgba(15, 23, 42, 0.12),
+    0 1px 0 rgba(15, 23, 42, 0.04);
+}
+
+.course-page__doc-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.course-page__doc-card-name {
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.course-page__doc-card-date {
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.course-page__doc-badge {
+  flex-shrink: 0;
+  align-self: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  color: var(--brand-blue);
+  background: var(--active-bg-tint);
+  border: 1px solid rgba(0, 122, 255, 0.2);
+}
+
+@media (max-width: 700px) {
+  .course-page__body {
+    flex-direction: column;
+    min-height: auto;
+  }
+
+  .course-page__inner-sidebar {
+    width: 100%;
+    border-inline-end: none;
+    border-bottom: var(--border-hairline);
+  }
+
+  .course-page__inner-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .course-page__inner-nav-item {
+    width: auto;
+  }
 }
 
 /* Upload modal (UI only; no upload API) */
@@ -271,6 +477,34 @@
   line-height: 1.45;
 }
 
+.course-page__upload-feedback {
+  margin: 0 0 0.85rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.course-page__upload-feedback--success {
+  margin-bottom: 1rem;
+  color: #166534;
+  background: rgba(22, 101, 52, 0.08);
+  border: 1px solid rgba(22, 101, 52, 0.2);
+}
+
+.course-page__upload-feedback--error {
+  color: #991b1b;
+  background: rgba(185, 28, 28, 0.06);
+  border: 1px solid rgba(185, 28, 28, 0.22);
+}
+
+.course-page__upload-feedback--progress {
+  color: var(--text-primary);
+  background: var(--surface-page);
+  border: var(--border-hairline);
+  font-weight: 500;
+}
+
 .course-page__upload-input {
   position: absolute;
   width: 1px;
@@ -311,6 +545,12 @@
   border-color: var(--brand-blue);
   background: rgba(0, 122, 255, 0.08);
   box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
+}
+
+.course-page__upload-dropzone--disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .course-page__upload-dropzone > * {
