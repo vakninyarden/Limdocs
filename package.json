@@ -1,11 +1,11 @@
 {
   "name": "limdocs",
   "private": true,
-  "workspaces": ["web"],
+  "workspaces": ["frontend"],
   "scripts": {
-    "dev": "npm run dev -w web",
-    "build": "npm run build -w web",
-    "preview": "npm run preview -w web",
-    "lint": "npm run lint -w web"
+    "dev": "npm run dev -w frontend",
+    "build": "npm run build -w frontend",
+    "preview": "npm run preview -w frontend",
+    "lint": "npm run lint -w frontend"
   }
 }

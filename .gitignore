@@ -1,8 +1,8 @@
 docs/design.md
 
 node_modules/
-web/dist
+frontend/dist
 
 # Local environment (never commit secrets)
 .env.local
-web/.env.local
+frontend/.env.local

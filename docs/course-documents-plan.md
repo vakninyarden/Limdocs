@@ -32,13 +32,13 @@ Optional: verify course ownership before querying.
 
 ---
 
-## Frontend service — `web/src/services/documentsService.js`
+## Frontend service — `frontend/src/services/documentsService.js`
 
 **`getCourseDocuments(courseId, idToken)`** — `GET` with Bearer token; return `data.documents` or `[]`.
 
 ---
 
-## UI — `web/src/pages/CoursePage.jsx` and `CoursePage.css`
+## UI — `frontend/src/pages/CoursePage.jsx` and `CoursePage.css`
 
 - Two-column **`course-page__body`**: inner sidebar + main; materials count from **`documents.length`**.
 - **`activeTab`** (`materials`); fetch documents on load; refetch after upload.
