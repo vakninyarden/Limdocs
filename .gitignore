@@ -6,4 +6,3 @@ web/dist
 # Local environment (never commit secrets)
 .env.local
 web/.env.local
-
