@@ -83,6 +83,21 @@ Resources:
             AllowedOrigins:
               - "*"
 
+  ProcessedOutputsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "limdocs-processed-outputs-${AWS::AccountId}"
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - Authorization
+              - Content-Type
+            AllowedMethods:
+              - GET
+              - PUT
+            AllowedOrigins:
+              - "*"
+
   DocumentsTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -198,6 +213,30 @@ Resources:
             Path: /courses/{courseId}/upload-url
             Method: post
 
+  ProcessDocumentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: limdocs-process-document
+      CodeUri: src/
+      Handler: process_document.lambda_handler
+      Runtime: python3.9
+      # LabRole must include:
+      # - s3:GetObject on RawUploadsBucket objects
+      # - s3:PutObject on ProcessedOutputsBucket objects
+      # - textract:AnalyzeDocument or textract:DetectDocumentText
+      # - dynamodb:UpdateItem on DocumentsTable
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Environment:
+        Variables:
+          DOCUMENTS_TABLE: !Ref DocumentsTable
+          PROCESSED_BUCKET: !Ref ProcessedOutputsBucket
+      Events:
+        S3Event:
+          Type: S3
+          Properties:
+            Bucket: !Ref RawUploadsBucket
+            Events: s3:ObjectCreated:*
+
   GetCourseDocumentsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -296,6 +335,10 @@ Outputs:
   RawUploadsBucketName:
     Description: S3 bucket name for raw document uploads (pre-signed URL target)
     Value: !Ref RawUploadsBucket
+
+  ProcessedOutputsBucketName:
+    Description: S3 bucket for storing Textract extracted text and AI generated content
+    Value: !Ref ProcessedOutputsBucket
 
   DocumentsTableName:
     Description: DynamoDB table name for document metadata
