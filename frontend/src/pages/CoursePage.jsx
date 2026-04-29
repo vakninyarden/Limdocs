@@ -11,6 +11,8 @@ import {
   uploadFileToS3,
 } from '../services/documentsService.js'
 
+const FINAL_PROCESSING_STATUSES = new Set(['EXTRACTED', 'FAILED'])
+
 function fileKey(file) {
   return `${file.name}-${file.size}-${file.lastModified}`
 }
@@ -38,6 +40,10 @@ function formatDocumentDate(iso, lang) {
     dateStyle: 'medium',
     timeStyle: 'short',
   })
+}
+
+function normalizeProcessingStatus(status) {
+  return String(status ?? '').trim().toUpperCase()
 }
 
 export default function CoursePage() {
@@ -107,6 +113,23 @@ export default function CoursePage() {
     if (authStatus !== 'authed' || !courseId || activeTab !== 'materials') return
     loadDocuments()
   }, [authStatus, courseId, activeTab, loadDocuments])
+
+  useEffect(() => {
+    if (authStatus !== 'authed' || !courseId || activeTab !== 'materials') return undefined
+
+    const hasNonFinalDocuments = documents.some((doc) => {
+      const status = normalizeProcessingStatus(doc.processing_status ?? doc.processingStatus)
+      return !FINAL_PROCESSING_STATUSES.has(status)
+    })
+
+    if (!hasNonFinalDocuments) return undefined
+
+    const intervalId = window.setInterval(() => {
+      loadDocuments()
+    }, 7000)
+
+    return () => window.clearInterval(intervalId)
+  }, [authStatus, courseId, activeTab, documents, loadDocuments])
 
   const closeUploadModal = useCallback(() => {
     dragDepthRef.current = 0
@@ -420,10 +443,23 @@ export default function CoursePage() {
                     const name = doc.original_file_name ?? doc.originalFileName ?? '—'
                     const created = doc.created_at ?? doc.createdAt
                     const status = doc.processing_status ?? doc.processingStatus ?? ''
+                    const normalizedStatus = normalizeProcessingStatus(status)
                     const statusLabel =
-                      String(status).toUpperCase() === 'UPLOADED'
-                        ? t.coursePage.statusUploaded
-                        : String(status || '—')
+                      normalizedStatus === 'UPLOADED'
+                        ? t.coursePage.statusProcessing
+                        : normalizedStatus === 'EXTRACTED'
+                          ? t.coursePage.statusReady
+                          : normalizedStatus === 'FAILED'
+                            ? t.coursePage.statusFailed
+                            : String(status || '—')
+                    const badgeTone =
+                      normalizedStatus === 'EXTRACTED'
+                        ? 'ready'
+                        : normalizedStatus === 'FAILED'
+                          ? 'failed'
+                          : normalizedStatus === 'UPLOADED'
+                            ? 'processing'
+                            : 'default'
                     const deletingThisDoc = deletingDocId === String(id)
                     return (
                       <li key={String(id)} className="course-page__doc-card">
@@ -435,7 +471,29 @@ export default function CoursePage() {
                             {formatDocumentDate(created, lang)}
                           </span>
                         </div>
-                        <span className="course-page__doc-badge">{statusLabel}</span>
+                        <span
+                          className={`course-page__doc-badge course-page__doc-badge--${badgeTone}`}
+                          style={{
+                            backgroundColor:
+                              badgeTone === 'ready'
+                                ? '#d1fae5'
+                                : badgeTone === 'failed'
+                                  ? '#fee2e2'
+                                  : badgeTone === 'processing'
+                                    ? '#ffedd5'
+                                    : undefined,
+                            color:
+                              badgeTone === 'ready'
+                                ? '#065f46'
+                                : badgeTone === 'failed'
+                                  ? '#991b1b'
+                                  : badgeTone === 'processing'
+                                    ? '#9a3412'
+                                    : undefined,
+                          }}
+                        >
+                          {statusLabel}
+                        </span>
                         <div className="course-page__doc-card-actions">
                           <button
                             type="button"
