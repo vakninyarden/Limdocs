@@ -28,3 +28,23 @@ export async function getUserCourses(userId, idToken) {
   }
   return []
 }
+
+export async function deleteCourse(courseId, idToken) {
+  if (!apiBaseUrl) {
+    throw new Error('API is not configured. Set VITE_API_URL.')
+  }
+  if (!courseId) {
+    throw new Error('Missing courseId.')
+  }
+  if (!idToken) {
+    throw new Error('Missing idToken.')
+  }
+
+  const response = await axios.delete(`${apiBaseUrl}/courses/${encodeURIComponent(courseId)}`, {
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+    },
+  })
+
+  return response?.data ?? {}
+}

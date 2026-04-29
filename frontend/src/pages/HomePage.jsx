@@ -8,7 +8,7 @@ import {
 } from 'aws-amplify/auth'
 import './HomePage.css'
 import { useLanguageControl } from '../language-control/LanguageControlProvider.jsx'
-import { getUserCourses } from '../services/coursesService.js'
+import { deleteCourse, getUserCourses } from '../services/coursesService.js'
 
 function IconHome() {
   return (
@@ -129,6 +129,21 @@ function IconPlus() {
   )
 }
 
+function IconTrash() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M9 3.75h6m-7.5 3h9m-7.5 3.75v7.5m3-7.5v7.5m4.875-10.5-.662 9.272A2.25 2.25 0 0 1 13.97 21h-3.94a2.25 2.25 0 0 1-2.243-2.028L7.125 7.5"
+      />
+    </svg>
+  )
+}
+
 function logAuthError(context, error) {
   const message = error?.message ?? String(error)
   const name = error?.name ?? error?.code
@@ -148,6 +163,10 @@ export default function HomePage() {
   const [isCoursesLoading, setIsCoursesLoading] = useState(false)
   const [coursesError, setCoursesError] = useState('')
   const [coursesRefreshKey, setCoursesRefreshKey] = useState(0)
+  const [isDeleteCourseOpen, setIsDeleteCourseOpen] = useState(false)
+  const [isDeletingCourse, setIsDeletingCourse] = useState(false)
+  const [deleteCourseError, setDeleteCourseError] = useState('')
+  const [courseToDelete, setCourseToDelete] = useState(null)
   const apiBaseUrl = import.meta.env.VITE_API_URL ?? ''
   const [courseDraft, setCourseDraft] = useState({
     name: '',
@@ -241,6 +260,57 @@ export default function HomePage() {
       description: '',
       visibility: 'private',
     })
+  }
+
+  const closeDeleteCourseModal = () => {
+    if (isDeletingCourse) return
+    setIsDeleteCourseOpen(false)
+    setDeleteCourseError('')
+    setCourseToDelete(null)
+  }
+
+  const handleDeleteCourseClick = (e, course) => {
+    e.stopPropagation()
+    const courseId = String(course?.course_id ?? course?.id ?? course?.courseId ?? '').trim()
+    const courseName = String(course?.course_name ?? course?.name ?? t.home.untitledCourse)
+    if (!courseId) return
+    setCourseToDelete({ id: courseId, name: courseName })
+    setDeleteCourseError('')
+    setIsDeleteCourseOpen(true)
+  }
+
+  const handleConfirmDeleteCourse = async () => {
+    if (!courseToDelete?.id || isDeletingCourse) return
+    setDeleteCourseError('')
+    try {
+      setIsDeletingCourse(true)
+      const session = await fetchAuthSession()
+      const idToken = session.tokens?.idToken?.toString()
+      if (!idToken) {
+        throw new Error(t.home.deleteCourseMissingSession)
+      }
+
+      await deleteCourse(courseToDelete.id, idToken)
+      setCourses((prev) => {
+        const next = prev.filter((course, index) => {
+          const id = String(course.course_id ?? course.id ?? course.courseId ?? `course-${index}`)
+          return id !== courseToDelete.id
+        })
+        return next
+      })
+      setIsDeleteCourseOpen(false)
+      setCourseToDelete(null)
+      setDeleteCourseError('')
+    } catch (error) {
+      const apiMessage = error?.response?.data?.message
+      if (typeof apiMessage === 'string' && apiMessage.trim()) {
+        setDeleteCourseError(apiMessage.trim())
+      } else {
+        setDeleteCourseError(error?.message || t.home.deleteCourseError)
+      }
+    } finally {
+      setIsDeletingCourse(false)
+    }
   }
 
   const handleCreateCourseSubmit = async (e) => {
@@ -378,30 +448,46 @@ export default function HomePage() {
 
           {!isCoursesLoading && !coursesError ? (
             <ul className="home-page__courses-grid">
+              {courses.length === 0 ? (
+                <li className="home-page__courses-grid-item home-page__courses-grid-item--empty">
+                  <p className="home-page__courses-state">{t.home.coursesEmpty}</p>
+                </li>
+              ) : null}
               {courses.map((course) => {
                 const courseId = course.course_id ?? course.id ?? course.courseId ?? ''
                 const courseName =
                   course.course_name ?? course.name ?? t.home.untitledCourse
                 return (
                   <li key={String(courseId || courseName)} className="home-page__courses-grid-item">
-                    <button
-                      type="button"
-                      className="home-page__course-card"
-                      onClick={() => {
-                        if (!courseId) return
-                        navigate(`/course/${encodeURIComponent(String(courseId))}`, {
-                          state: { courseName },
-                        })
-                      }}
-                    >
-                      <span className="home-page__course-card-icon-wrap" aria-hidden>
-                        <IconFolder />
-                      </span>
-                      <span className="home-page__course-card-text">
-                        <span className="home-page__course-name">{courseName}</span>
-                      </span>
-                      <IconChevronEnd />
-                    </button>
+                    <div className="home-page__course-card-shell">
+                      <button
+                        type="button"
+                        className="home-page__course-card"
+                        onClick={() => {
+                          if (!courseId) return
+                          navigate(`/course/${encodeURIComponent(String(courseId))}`, {
+                            state: { courseName },
+                          })
+                        }}
+                      >
+                        <span className="home-page__course-card-icon-wrap" aria-hidden>
+                          <IconFolder />
+                        </span>
+                        <span className="home-page__course-card-text">
+                          <span className="home-page__course-name">{courseName}</span>
+                        </span>
+                        <IconChevronEnd />
+                      </button>
+                      <button
+                        type="button"
+                        className="home-page__course-delete-btn"
+                        onClick={(e) => handleDeleteCourseClick(e, course)}
+                        disabled={isDeletingCourse}
+                        aria-label={tx(t.home.deleteCourseAria, { name: courseName })}
+                      >
+                        <IconTrash />
+                      </button>
+                    </div>
                   </li>
                 )
               })}
@@ -506,6 +592,49 @@ export default function HomePage() {
                 </p>
               ) : null}
             </form>
+          </section>
+        </div>
+      ) : null}
+      {isDeleteCourseOpen ? (
+        <div
+          className="home-page__modal-backdrop"
+          role="presentation"
+          onClick={closeDeleteCourseModal}
+        >
+          <section
+            className="home-page__modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t.home.deleteCourseModalTitle}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="home-page__modal-title">{t.home.deleteCourseModalTitle}</h2>
+            <p className="home-page__modal-subtitle">
+              {tx(t.home.deleteCoursePrompt, { name: courseToDelete?.name || t.home.untitledCourse })}
+            </p>
+            <div className="home-page__modal-actions">
+              <button
+                type="button"
+                className="home-page__modal-cancel"
+                disabled={isDeletingCourse}
+                onClick={closeDeleteCourseModal}
+              >
+                {t.home.cancel}
+              </button>
+              <button
+                type="button"
+                className="home-page__modal-submit home-page__modal-submit--danger"
+                disabled={isDeletingCourse}
+                onClick={handleConfirmDeleteCourse}
+              >
+                {isDeletingCourse ? t.home.deleteCourseDeleting : t.home.deleteCourseConfirm}
+              </button>
+            </div>
+            {deleteCourseError ? (
+              <p className="home-page__modal-error" role="alert">
+                {deleteCourseError}
+              </p>
+            ) : null}
           </section>
         </div>
       ) : null}

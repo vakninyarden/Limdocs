@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { fetchAuthSession, getCurrentUser } from 'aws-amplify/auth'
 import './CoursePage.css'
 import { useLanguageControl } from '../language-control/LanguageControlProvider.jsx'
+import { deleteCourse } from '../services/coursesService.js'
 import {
   deleteDocument,
   getCourseDocuments,
@@ -53,6 +54,9 @@ export default function CoursePage() {
   const [deletingDocId, setDeletingDocId] = useState(null)
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [pendingDeleteDoc, setPendingDeleteDoc] = useState(null)
+  const [isDeleteCourseModalOpen, setIsDeleteCourseModalOpen] = useState(false)
+  const [isDeletingCourse, setIsDeletingCourse] = useState(false)
+  const [deleteCourseError, setDeleteCourseError] = useState(null)
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
   const [selectedFiles, setSelectedFiles] = useState([])
   const [isDraggingOverDropzone, setIsDraggingOverDropzone] = useState(false)
@@ -120,6 +124,12 @@ export default function CoursePage() {
     setIsDeleteModalOpen(false)
     setPendingDeleteDoc(null)
   }, [deletingDocId])
+
+  const closeDeleteCourseModal = useCallback(() => {
+    if (isDeletingCourse) return
+    setIsDeleteCourseModalOpen(false)
+    setDeleteCourseError(null)
+  }, [isDeletingCourse])
 
   const addFiles = useCallback((files) => {
     if (!files.length) return
@@ -362,6 +372,16 @@ export default function CoursePage() {
                   }}
                 >
                   {t.coursePage.uploadMaterial}
+                </button>
+                <button
+                  type="button"
+                  className="course-page__modal-cancel course-page__delete-course-btn"
+                  onClick={() => {
+                    setDeleteCourseError(null)
+                    setIsDeleteCourseModalOpen(true)
+                  }}
+                >
+                  {t.coursePage.deleteCourseLabel}
                 </button>
               </div>
 
@@ -658,6 +678,77 @@ export default function CoursePage() {
                 onClick={handleConfirmDelete}
               >
                 {deletingDocId ? t.coursePage.deleteDeleting : t.coursePage.deleteConfirmCta}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {isDeleteCourseModalOpen ? (
+        <div
+          className="course-page__modal-backdrop"
+          role="presentation"
+          onClick={closeDeleteCourseModal}
+        >
+          <section
+            className="course-page__modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="course-delete-course-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="course-delete-course-modal-title" className="course-page__modal-title">
+              {t.coursePage.deleteCourseModalTitle}
+            </h2>
+            <p className="course-page__modal-subtitle">
+              {tx(t.coursePage.deleteCoursePrompt, { name: displayCourseName })}
+            </p>
+            {deleteCourseError ? (
+              <p className="course-page__documents-error" role="alert">
+                {deleteCourseError}
+              </p>
+            ) : null}
+            <div className="course-page__modal-actions">
+              <button
+                type="button"
+                className="course-page__modal-cancel"
+                disabled={isDeletingCourse}
+                onClick={closeDeleteCourseModal}
+              >
+                {t.home.cancel}
+              </button>
+              <button
+                type="button"
+                className="course-page__modal-submit course-page__modal-submit--danger"
+                disabled={isDeletingCourse}
+                onClick={async () => {
+                  if (!courseId || isDeletingCourse) return
+                  try {
+                    setIsDeletingCourse(true)
+                    setDeleteCourseError(null)
+                    const session = await fetchAuthSession()
+                    const idToken = session.tokens?.idToken?.toString()
+                    if (!idToken) {
+                      throw new Error(t.coursePage.uploadMissingSession)
+                    }
+                    await deleteCourse(courseId, idToken)
+                    navigate('/home', { replace: true })
+                  } catch (err) {
+                    const apiMsg = err?.response?.data?.message
+                    if (typeof apiMsg === 'string' && apiMsg.trim()) {
+                      setDeleteCourseError(apiMsg.trim())
+                    } else if (typeof err?.message === 'string' && err.message.trim()) {
+                      setDeleteCourseError(err.message.trim())
+                    } else {
+                      setDeleteCourseError(t.coursePage.deleteCourseError)
+                    }
+                  } finally {
+                    setIsDeletingCourse(false)
+                  }
+                }}
+              >
+                {isDeletingCourse
+                  ? t.coursePage.deleteCourseDeleting
+                  : t.coursePage.deleteCourseConfirm}
               </button>
             </div>
           </section>

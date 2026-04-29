@@ -276,6 +276,15 @@
   outline-offset: 3px;
 }
 
+.course-page__delete-course-btn {
+  color: #b91c1c;
+  border-color: rgba(185, 28, 28, 0.4);
+}
+
+.course-page__delete-course-btn:hover {
+  background: rgba(254, 226, 226, 0.9);
+}
+
 .course-page__materials-heading {
   margin: 0 0 0.75rem;
   font-size: 1.125rem;
