@@ -291,6 +291,20 @@ def _set_documents_status(document_ids, status, correlation_id):
     logger.info("cid=%s updated_documents_status status=%s count=%s", correlation_id, status, len(document_ids))
 
 
+def _mark_quiz_generated(document_ids, correlation_id):
+    for document_id in document_ids:
+        _documents_table.update_item(
+            Key={"document_id": document_id},
+            UpdateExpression="SET processing_status = :ready, has_generated_quiz = :has_quiz",
+            ExpressionAttributeValues={":ready": "READY", ":has_quiz": True},
+        )
+    logger.info(
+        "cid=%s marked_documents_practiced status=READY count=%s",
+        correlation_id,
+        len(document_ids),
+    )
+
+
 def _generate_questions_worker(course_id, document_ids, correlation_id):
     source_texts = []
     empty_text_document_ids = []
@@ -373,7 +387,7 @@ def _generate_questions_worker(course_id, document_ids, correlation_id):
                 }
             )
 
-    _set_documents_status(document_ids, "GENERATED", correlation_id)
+    _mark_quiz_generated(document_ids, correlation_id)
     logger.info(
         "cid=%s persisted_question_set set_id=%s inserted=%s discarded=%s",
         correlation_id,
@@ -412,7 +426,7 @@ def lambda_handler(event, context):
             except Exception:
                 logger.exception("cid=%s worker_failed course_id=%s", correlation_id, course_id)
                 logger.error("cid=%s worker_traceback=%s", correlation_id, traceback.format_exc())
-                _set_documents_status(document_ids, "FAILED", correlation_id)
+                _set_documents_status(document_ids, "READY", correlation_id)
                 raise
             return {"ok": True}
 
@@ -448,7 +462,7 @@ def lambda_handler(event, context):
             _invoke_worker_async(worker_payload, context, correlation_id)
         except Exception:
             logger.exception("cid=%s failed_to_enqueue_worker", correlation_id)
-            _set_documents_status(document_ids, "FAILED", correlation_id)
+            _set_documents_status(document_ids, "READY", correlation_id)
             return _response(500, {"message": "Failed to start async generation job"})
 
         return _response(

@@ -12,8 +12,8 @@ import {
   uploadFileToS3,
 } from '../services/documentsService.js'
 
-const FINAL_PROCESSING_STATUSES = new Set(['EXTRACTED', 'GENERATED', 'FAILED'])
-const QUIZ_ELIGIBLE_STATUSES = new Set(['EXTRACTED', 'GENERATED', 'FAILED'])
+const FINAL_PROCESSING_STATUSES = new Set(['READY', 'FAILED', 'ERROR'])
+const QUIZ_ELIGIBLE_STATUSES = new Set(['READY'])
 
 function fileKey(file) {
   return `${file.name}-${file.size}-${file.lastModified}`
@@ -75,7 +75,9 @@ export default function CoursePage() {
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedDocIds, setSelectedDocIds] = useState([])
   const [isGeneratingQuiz, setIsGeneratingQuiz] = useState(false)
+  const [quizError, setQuizError] = useState(null)
   const [quizStartedNotice, setQuizStartedNotice] = useState(null)
+  const [quizOverlayMessageIndex, setQuizOverlayMessageIndex] = useState(0)
   const fileInputRef = useRef(null)
   const dragDepthRef = useRef(0)
 
@@ -282,6 +284,19 @@ export default function CoursePage() {
   }, [quizStartedNotice])
 
   useEffect(() => {
+    if (!isGeneratingQuiz) {
+      setQuizOverlayMessageIndex(0)
+      return undefined
+    }
+
+    const intervalId = window.setInterval(() => {
+      setQuizOverlayMessageIndex((prev) => (prev + 1) % 3)
+    }, 1800)
+
+    return () => window.clearInterval(intervalId)
+  }, [isGeneratingQuiz])
+
+  useEffect(() => {
     if (!uploadSuccess || !isUploadModalOpen) return undefined
     const timer = window.setTimeout(() => {
       closeUploadModal()
@@ -311,6 +326,7 @@ export default function CoursePage() {
     if (deletingDocId) return
     setDocumentsError(null)
     setDocumentsNotice(null)
+    setQuizError(null)
     setPendingDeleteDoc({
       id: String(id),
       name: String(doc.original_file_name ?? doc.originalFileName ?? '—'),
@@ -359,6 +375,7 @@ export default function CoursePage() {
 
   const toggleSelectionMode = () => {
     if (isGeneratingQuiz) return
+    setQuizError(null)
     setSelectionMode((prev) => {
       if (prev) {
         setSelectedDocIds([])
@@ -369,6 +386,7 @@ export default function CoursePage() {
 
   const toggleDocSelection = (docId) => {
     if (!selectionMode || isGeneratingQuiz) return
+    if (!eligibleDocIds.includes(docId)) return
     setSelectedDocIds((prev) =>
       prev.includes(docId) ? prev.filter((existingId) => existingId !== docId) : [...prev, docId],
     )
@@ -380,6 +398,7 @@ export default function CoursePage() {
     setDocumentsError(null)
     setDocumentsNotice(null)
     setQuizStartedNotice(null)
+    setQuizError(null)
     setIsGeneratingQuiz(true)
     try {
       const session = await fetchAuthSession()
@@ -390,10 +409,10 @@ export default function CoursePage() {
       await generateQuiz(courseId, selectedDocIds, idToken)
       setSelectionMode(false)
       setSelectedDocIds([])
-      setQuizStartedNotice(t.coursePage.quizGenerationSuccess)
+      setQuizStartedNotice(t.coursePage.success)
       await loadDocuments()
     } catch (err) {
-      let message = t.coursePage.quizGenerationError
+      let message = t.coursePage.quizGenerationFailed
       const apiMsg = err?.response?.data?.message
       if (typeof apiMsg === 'string' && apiMsg.trim()) {
         message = apiMsg.trim()
@@ -402,11 +421,17 @@ export default function CoursePage() {
       } else if (typeof err?.message === 'string' && err.message.trim()) {
         message = err.message.trim()
       }
-      setDocumentsError(message)
+      setQuizError(message)
     } finally {
       setIsGeneratingQuiz(false)
     }
   }
+
+  const quizOverlayMessages = [
+    t.coursePage.quizOverlayMessage1,
+    t.coursePage.quizOverlayMessage2,
+    t.coursePage.quizOverlayMessage3,
+  ]
 
   return (
     <main
@@ -531,6 +556,20 @@ export default function CoursePage() {
                 </p>
               ) : null}
 
+              {quizError && !documentsLoading ? (
+                <div className="course-page__quiz-error" role="alert">
+                  <p className="course-page__quiz-error-text">{quizError}</p>
+                  <button
+                    type="button"
+                    className="course-page__quiz-error-retry"
+                    onClick={handleGenerateQuiz}
+                    disabled={isGeneratingQuiz || selectedDocIds.length === 0}
+                  >
+                    {t.coursePage.tryAgain}
+                  </button>
+                </div>
+              ) : null}
+
               {documentsNotice && !documentsLoading ? (
                 <p className="course-page__documents-notice" role="status">
                   {documentsNotice}
@@ -558,75 +597,48 @@ export default function CoursePage() {
                     const created = doc.created_at ?? doc.createdAt
                     const status = doc.processing_status ?? doc.processingStatus ?? ''
                     const normalizedStatus = normalizeProcessingStatus(status)
-                    const statusLabel =
-                      normalizedStatus === 'UPLOADED'
-                        ? t.coursePage.statusProcessing
-                        : normalizedStatus === 'GENERATING'
-                          ? t.coursePage.statusGenerating
-                        : normalizedStatus === 'GENERATED'
-                          ? t.coursePage.statusGenerated
-                        : normalizedStatus === 'EXTRACTED'
-                          ? t.coursePage.statusReady
-                          : normalizedStatus === 'FAILED'
-                            ? t.coursePage.statusFailed
-                            : String(status || '—')
-                    const badgeTone =
-                      normalizedStatus === 'EXTRACTED'
-                        ? 'ready'
-                        : normalizedStatus === 'FAILED'
-                          ? 'failed'
-                          : normalizedStatus === 'UPLOADED' || normalizedStatus === 'GENERATING'
-                            ? 'processing'
-                            : 'default'
+                    const isInteractive = QUIZ_ELIGIBLE_STATUSES.has(normalizedStatus)
+                    const hasGeneratedQuiz = Boolean(
+                      doc.has_generated_quiz ?? doc.hasGeneratedQuiz ?? false,
+                    )
                     const deletingThisDoc = deletingDocId === String(id)
                     const docId = String(id)
-                    const isQuizEligible = QUIZ_ELIGIBLE_STATUSES.has(normalizedStatus)
                     const isSelected = selectedDocIds.includes(docId)
                     return (
-                      <li key={String(id)} className="course-page__doc-card">
-                        {selectionMode && isQuizEligible ? (
+                      <li
+                        key={String(id)}
+                        className={`course-page__doc-card ${
+                          !isInteractive ? 'course-page__doc-card--processing' : ''
+                        }`}
+                      >
+                        {selectionMode ? (
                           <label className="course-page__doc-select" aria-label={tx(t.coursePage.quizSelectDocAria, { name })}>
                             <input
                               type="checkbox"
                               className="course-page__doc-select-input"
                               checked={isSelected}
                               onChange={() => toggleDocSelection(docId)}
-                              disabled={isGeneratingQuiz}
+                              disabled={isGeneratingQuiz || !isInteractive}
                             />
                             <span className="course-page__doc-select-checkmark" aria-hidden />
                           </label>
                         ) : null}
                         <div className="course-page__doc-card-main">
-                          <span className="course-page__doc-card-name" title={String(name)}>
-                            {String(name)}
+                          <span className="course-page__doc-card-name-row">
+                            <span className="course-page__doc-card-name" title={String(name)}>
+                              {String(name)}
+                            </span>
+                            {hasGeneratedQuiz ? (
+                              <span className="course-page__doc-practiced-indicator" aria-hidden>
+                                ✓
+                              </span>
+                            ) : null}
                           </span>
                           <span className="course-page__doc-card-date">
                             {formatDocumentDate(created, lang)}
                           </span>
                         </div>
-                        <span
-                          className={`course-page__doc-badge course-page__doc-badge--${badgeTone}`}
-                          style={{
-                            backgroundColor:
-                              badgeTone === 'ready'
-                                ? '#d1fae5'
-                                : badgeTone === 'failed'
-                                  ? '#fee2e2'
-                                  : badgeTone === 'processing'
-                                    ? '#ffedd5'
-                                    : undefined,
-                            color:
-                              badgeTone === 'ready'
-                                ? '#065f46'
-                                : badgeTone === 'failed'
-                                  ? '#991b1b'
-                                  : badgeTone === 'processing'
-                                    ? '#9a3412'
-                                    : undefined,
-                          }}
-                        >
-                          {statusLabel}
-                        </span>
+                        {!isInteractive ? <span className="mini-spinner" aria-hidden /> : null}
                         <div className="course-page__doc-card-actions">
                           <button
                             type="button"
@@ -958,6 +970,17 @@ export default function CoursePage() {
           >
             {isGeneratingQuiz ? t.coursePage.quizGenerating : t.coursePage.quizGenerate}
           </button>
+        </div>
+      ) : null}
+      {isGeneratingQuiz ? (
+        <div className="quiz-loading-overlay" role="status" aria-live="polite" aria-busy="true">
+          <div className="quiz-loading-overlay__content">
+            <span className="quiz-loading-overlay__spinner" aria-hidden />
+            <p className="quiz-loading-overlay__title">{t.coursePage.quizLoadingTitle}</p>
+            <p className="quiz-loading-overlay__message">
+              {quizOverlayMessages[quizOverlayMessageIndex]}
+            </p>
+          </div>
         </div>
       ) : null}
     </main>
