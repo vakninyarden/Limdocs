@@ -1,6 +1,8 @@
 import json
 import logging
 import os
+import re
+import traceback
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -21,6 +23,7 @@ logger.setLevel(logging.INFO)
 
 _dynamodb = boto3.resource("dynamodb")
 _s3 = boto3.client("s3")
+_lambda = boto3.client("lambda")
 _documents_table = _dynamodb.Table(DOCUMENTS_TABLE)
 _questions_table = _dynamodb.Table(QUESTIONS_TABLE)
 _question_sets_table = _dynamodb.Table(QUESTION_SETS_TABLE)
@@ -37,7 +40,11 @@ _SYSTEM_PROMPT = (
     "questions in Hebrew based on the provided text. Categorize each question with "
     "relevant topics and assign difficulty as Easy, Medium, or Hard based on the "
     "academic depth of the text. Ensure at least 1-2 questions synthesize or compare "
-    "information across multiple provided documents. Return ONLY a valid JSON array of objects."
+    "information across multiple provided documents. Return ONLY a valid JSON array of objects. "
+    "Each object must include: question (string), options (array of 4 strings), "
+    "correct_index (integer 0-3), explanation (string), topics (array of strings), "
+    "difficulty (Easy|Medium|Hard). Optionally, answer (string) may be included as "
+    "redundant text matching one value in options."
 )
 
 
@@ -61,6 +68,35 @@ def _clean_model_json(raw_text):
     if text.lower().startswith("json"):
         text = text[4:].strip()
     return text
+
+
+def _extract_json_payload(raw_text):
+    text = (raw_text or "").strip()
+    if not text:
+        return text
+
+    fenced_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text, flags=re.IGNORECASE)
+    if fenced_match:
+        text = fenced_match.group(1).strip()
+
+    text = _clean_model_json(text)
+    if not text:
+        return text
+
+    for opener, closer in (("[", "]"), ("{", "}")):
+        start = text.find(opener)
+        end = text.rfind(closer)
+        if start != -1 and end > start:
+            return text[start : end + 1].strip()
+
+    return text
+
+
+def _truncate_for_log(value, limit=3000):
+    text = (value or "").strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}... [truncated]"
 
 
 def _truncate_source_text(text):
@@ -109,6 +145,8 @@ def _normalize_question(item):
     correct_index = item.get("correct_index")
     explanation = item.get("explanation")
     topics = item.get("topics")
+    topic = item.get("topic")
+    answer = item.get("answer")
     difficulty = item.get("difficulty")
 
     if not isinstance(question, str) or not question.strip():
@@ -119,26 +157,58 @@ def _normalize_question(item):
         return None
     if any(not isinstance(opt, str) or not opt.strip() for opt in options):
         return None
-    if not isinstance(correct_index, int) or correct_index < 0 or correct_index > 3:
+    normalized_options = [opt.strip() for opt in options]
+
+    resolved_correct_index = correct_index if isinstance(correct_index, int) else None
+    if resolved_correct_index is None or resolved_correct_index < 0 or resolved_correct_index > 3:
+        resolved_correct_index = None
+        if isinstance(answer, str) and answer.strip():
+            normalized_answer = answer.strip()
+            for idx, option in enumerate(normalized_options):
+                if option == normalized_answer:
+                    resolved_correct_index = idx
+                    break
+            if resolved_correct_index is None:
+                lowered_answer = normalized_answer.lower()
+                for idx, option in enumerate(normalized_options):
+                    if option.lower() == lowered_answer:
+                        resolved_correct_index = idx
+                        break
+    if resolved_correct_index is None:
         return None
-    if not isinstance(topics, list) or any(not isinstance(topic, str) or not topic.strip() for topic in topics):
+
+    if isinstance(topics, list):
+        normalized_topics = [str(t).strip() for t in topics if isinstance(t, str) and t.strip()]
+    elif isinstance(topic, str) and topic.strip():
+        normalized_topics = [topic.strip()]
+    else:
+        normalized_topics = []
+    if not normalized_topics:
         return None
-    if not isinstance(difficulty, str) or difficulty not in _ALLOWED_DIFFICULTIES:
-        return None
+
+    if isinstance(difficulty, str) and difficulty.strip():
+        normalized_difficulty = difficulty.strip().title()
+    else:
+        normalized_difficulty = "Medium"
+    if normalized_difficulty not in _ALLOWED_DIFFICULTIES:
+        normalized_difficulty = "Medium"
 
     return {
         "question": question.strip(),
-        "options": [opt.strip() for opt in options],
-        "correct_index": correct_index,
+        "options": normalized_options,
+        "correct_index": resolved_correct_index,
         "explanation": explanation.strip(),
-        "topics": [topic.strip() for topic in topics if topic.strip()],
-        "difficulty": difficulty,
+        "topics": normalized_topics,
+        "difficulty": normalized_difficulty,
     }
 
 
 def _parse_valid_questions(raw_response):
-    cleaned = _clean_model_json(raw_response)
-    parsed = json.loads(cleaned)
+    cleaned = _extract_json_payload(raw_response)
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Model response is not valid JSON after cleaning: {exc}") from exc
     if not isinstance(parsed, list):
         raise ValueError("Model response must be a JSON array")
 
@@ -150,164 +220,246 @@ def _parse_valid_questions(raw_response):
             discarded += 1
             continue
         valid.append(normalized)
-    return valid, discarded
+    return valid, discarded, cleaned
+
+
+def _get_claims(event):
+    return (
+        event.get("requestContext", {})
+        .get("authorizer", {})
+        .get("claims", {})
+    )
+
+
+def _parse_api_request(event):
+    claims = _get_claims(event)
+    if not claims.get("sub"):
+        return None, _response(401, {"message": "Unauthorized: missing user identity"})
+
+    path_parameters = event.get("pathParameters", {})
+    course_id = path_parameters.get("courseId")
+    if not course_id:
+        return None, _response(400, {"message": "Missing path parameter: courseId"})
+
+    raw_body = event.get("body") or "{}"
+    if event.get("isBase64Encoded", False):
+        import base64
+        raw_body = base64.b64decode(raw_body).decode("utf-8")
+    body = json.loads(raw_body)
+
+    document_ids = body.get("documentIds")
+    if not isinstance(document_ids, list) or not document_ids:
+        return None, _response(400, {"message": "Field 'documentIds' must be a non-empty list"})
+    if any(not isinstance(doc_id, str) or not doc_id.strip() for doc_id in document_ids):
+        return None, _response(400, {"message": "Field 'documentIds' must contain non-empty strings"})
+
+    normalized_document_ids = [doc_id.strip() for doc_id in document_ids]
+    return {
+        "course_id": course_id,
+        "document_ids": normalized_document_ids,
+        "requested_by": claims["sub"],
+    }, None
+
+
+def _validate_documents(course_id, document_ids, correlation_id):
+    source_keys = {}
+    for document_id in document_ids:
+        result = _documents_table.get_item(Key={"document_id": document_id})
+        item = result.get("Item")
+        if not item:
+            return None, _response(404, {"message": f"Document not found: {document_id}"})
+        if item.get("course_id") != course_id:
+            return None, _response(403, {"message": f"Forbidden for document: {document_id}"})
+        processing_status = str(item.get("processing_status") or "").strip().upper()
+        if processing_status == "GENERATING":
+            return None, _response(409, {"message": "Quiz generation already in progress"})
+        processed_key = item.get("s3_processed_key")
+        if not processed_key:
+            return None, _response(400, {"message": f"Document is not processed yet: {document_id}"})
+        source_keys[document_id] = processed_key
+    logger.info("cid=%s validated_documents=%s", correlation_id, len(document_ids))
+    return source_keys, None
+
+
+def _set_documents_status(document_ids, status, correlation_id):
+    for document_id in document_ids:
+        _documents_table.update_item(
+            Key={"document_id": document_id},
+            UpdateExpression="SET processing_status = :status",
+            ExpressionAttributeValues={":status": status},
+        )
+    logger.info("cid=%s updated_documents_status status=%s count=%s", correlation_id, status, len(document_ids))
+
+
+def _generate_questions_worker(course_id, document_ids, correlation_id):
+    source_texts = []
+    empty_text_document_ids = []
+    for document_id in document_ids:
+        result = _documents_table.get_item(Key={"document_id": document_id})
+        item = result.get("Item")
+        if not item:
+            raise ValueError(f"Document not found: {document_id}")
+        processed_key = item.get("s3_processed_key")
+        if not processed_key:
+            raise ValueError(f"Document is not processed yet: {document_id}")
+
+        s3_obj = _s3.get_object(Bucket=PROCESSED_BUCKET, Key=processed_key)
+        source_text = s3_obj["Body"].read().decode("utf-8", errors="replace")
+        if not source_text.strip():
+            empty_text_document_ids.append(document_id)
+        source_texts.append(source_text)
+
+    if empty_text_document_ids:
+        logger.warning("WARNING: Extracted text is empty for documents: %s", empty_text_document_ids)
+
+    input_text, budgets = _build_balanced_context(source_texts)
+    input_text = _truncate_source_text(input_text)
+    logger.info(
+        "cid=%s built_balanced_context documents=%s total_input_len=%s budgets=%s",
+        correlation_id,
+        len(document_ids),
+        len(input_text),
+        budgets,
+    )
+
+    from openai import OpenAI
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    completion = client.chat.completions.create(
+        model=OPENAI_MODEL_NAME,
+        messages=[
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": input_text},
+        ],
+        temperature=0.2,
+        timeout=60,
+    )
+    print(f"DEBUG: Raw AI Response: {completion.choices[0].message.content}")
+    raw_response = completion.choices[0].message.content or ""
+    valid_questions, discarded_count, cleaned_response = _parse_valid_questions(raw_response)
+
+    if not valid_questions:
+        logger.error(
+            "cid=%s no_valid_questions raw_response=%s cleaned_response=%s",
+            correlation_id,
+            _truncate_for_log(raw_response),
+            _truncate_for_log(cleaned_response),
+        )
+        raise ValueError("AI response contained no valid questions")
+
+    set_id = str(uuid4())
+    created_at = datetime.now(timezone.utc).isoformat()
+    _question_sets_table.put_item(
+        Item={
+            "set_id": set_id,
+            "document_ids": document_ids,
+            "course_id": course_id,
+            "title": f"Combined Quiz - {len(document_ids)} Materials",
+            "created_at": created_at,
+        }
+    )
+
+    with _questions_table.batch_writer() as batch:
+        for question in valid_questions:
+            batch.put_item(
+                Item={
+                    "question_id": str(uuid4()),
+                    "set_id": set_id,
+                    "question": question["question"],
+                    "options": question["options"],
+                    "correct_index": question["correct_index"],
+                    "explanation": question["explanation"],
+                    "topics": question["topics"],
+                    "difficulty": question["difficulty"],
+                }
+            )
+
+    _set_documents_status(document_ids, "GENERATED", correlation_id)
+    logger.info(
+        "cid=%s persisted_question_set set_id=%s inserted=%s discarded=%s",
+        correlation_id,
+        set_id,
+        len(valid_questions),
+        discarded_count,
+    )
+
+
+def _invoke_worker_async(payload, context, correlation_id):
+    function_arn = context.invoked_function_arn
+    if not function_arn:
+        raise RuntimeError("Cannot resolve function ARN for async invocation")
+    _lambda.invoke(
+        FunctionName=function_arn,
+        InvocationType="Event",
+        Payload=json.dumps(payload).encode("utf-8"),
+    )
+    logger.info("cid=%s worker_enqueued function_arn=%s", correlation_id, function_arn)
 
 
 def lambda_handler(event, context):
-    del context
+    correlation_id = event.get("apiRequestId") or context.aws_request_id
     try:
-        claims = (
-            event.get("requestContext", {})
-            .get("authorizer", {})
-            .get("claims", {})
-        )
-        if not claims.get("sub"):
-            return _response(401, {"message": "Unauthorized: missing user identity"})
-
-        path_parameters = event.get("pathParameters", {})
-        course_id = path_parameters.get("courseId")
-        if not course_id:
-            return _response(400, {"message": "Missing path parameter: courseId"})
-
-        raw_body = event.get("body") or "{}"
-        if event.get("isBase64Encoded", False):
-            import base64
-            raw_body = base64.b64decode(raw_body).decode("utf-8")
-        body = json.loads(raw_body)
-
-        document_ids = body.get("documentIds")
-        if not isinstance(document_ids, list) or not document_ids:
-            return _response(400, {"message": "Field 'documentIds' must be a non-empty list"})
-        if any(not isinstance(doc_id, str) or not doc_id.strip() for doc_id in document_ids):
-            return _response(400, {"message": "Field 'documentIds' must contain non-empty strings"})
-
-        normalized_document_ids = [doc_id.strip() for doc_id in document_ids]
-
-        source_texts = []
-        for document_id in normalized_document_ids:
-            result = _documents_table.get_item(Key={"document_id": document_id})
-            item = result.get("Item")
-            if not item:
-                return _response(404, {"message": f"Document not found: {document_id}"})
-
-            if item.get("course_id") != course_id:
-                return _response(403, {"message": f"Forbidden for document: {document_id}"})
-
-            processed_key = item.get("s3_processed_key")
-            if not processed_key:
-                return _response(400, {"message": f"Document is not processed yet: {document_id}"})
-
+        if event.get("mode") == "worker":
+            course_id = event.get("courseId")
+            document_ids = event.get("documentIds") or []
+            logger.info(
+                "cid=%s worker_start course_id=%s doc_count=%s",
+                correlation_id,
+                course_id,
+                len(document_ids),
+            )
             try:
-                s3_obj = _s3.get_object(Bucket=PROCESSED_BUCKET, Key=processed_key)
-                source_text = s3_obj["Body"].read().decode("utf-8", errors="replace")
-                source_texts.append(source_text)
+                _generate_questions_worker(course_id, document_ids, correlation_id)
             except Exception:
-                logger.exception(
-                    "Failed reading processed text from S3 for document_id=%s key=%s",
-                    document_id,
-                    processed_key,
-                )
-                return _response(500, {"message": "Failed to load processed document text"})
+                logger.exception("cid=%s worker_failed course_id=%s", correlation_id, course_id)
+                logger.error("cid=%s worker_traceback=%s", correlation_id, traceback.format_exc())
+                _set_documents_status(document_ids, "FAILED", correlation_id)
+                raise
+            return {"ok": True}
 
-        input_text, budgets = _build_balanced_context(source_texts)
+        parsed, error_response = _parse_api_request(event)
+        if error_response:
+            return error_response
+
+        course_id = parsed["course_id"]
+        document_ids = parsed["document_ids"]
+        requested_by = parsed["requested_by"]
         logger.info(
-            "Built balanced context documents=%s total_input_len=%s budgets=%s",
-            len(normalized_document_ids),
-            len(input_text),
-            budgets,
+            "cid=%s api_request_received course_id=%s doc_count=%s requested_by=%s",
+            correlation_id,
+            course_id,
+            len(document_ids),
+            requested_by,
         )
 
+        _, error_response = _validate_documents(course_id, document_ids, correlation_id)
+        if error_response:
+            return error_response
+
+        _set_documents_status(document_ids, "GENERATING", correlation_id)
+        worker_payload = {
+            "mode": "worker",
+            "courseId": course_id,
+            "documentIds": document_ids,
+            "requestedBy": requested_by,
+            "apiRequestId": correlation_id,
+        }
         try:
-            from openai import OpenAI
-
-            client = OpenAI(api_key=OPENAI_API_KEY)
-            completion = client.chat.completions.create(
-                model=OPENAI_MODEL_NAME,
-                messages=[
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": input_text},
-                ],
-                temperature=0.2,
-            )
-            raw_response = completion.choices[0].message.content or ""
-            valid_questions, discarded_count = _parse_valid_questions(raw_response)
+            logger.info("Attempting to invoke worker for CID: %s", correlation_id)
+            _invoke_worker_async(worker_payload, context, correlation_id)
         except Exception:
-            logger.exception(
-                "OpenAI generation/parsing failed for document_ids=%s model=%s",
-                normalized_document_ids,
-                OPENAI_MODEL_NAME,
-            )
-            return _response(502, {"message": "Failed generating questions from AI response"})
+            logger.exception("cid=%s failed_to_enqueue_worker", correlation_id)
+            _set_documents_status(document_ids, "FAILED", correlation_id)
+            return _response(500, {"message": "Failed to start async generation job"})
 
-        logger.info(
-            "AI generation complete for document_ids=%s valid=%s discarded=%s",
-            normalized_document_ids,
-            len(valid_questions),
-            discarded_count,
-        )
-        if not valid_questions:
-            return _response(
-                422,
-                {"message": "AI response contained no valid questions"},
-            )
-
-        set_id = str(uuid4())
-        created_at = datetime.now(timezone.utc).isoformat()
-
-        _question_sets_table.put_item(
-            Item={
-                "set_id": set_id,
-                "document_ids": normalized_document_ids,
-                "course_id": course_id,
-                "title": f"Combined Quiz - {len(normalized_document_ids)} Materials",
-                "created_at": created_at,
-            }
-        )
-
-        with _questions_table.batch_writer() as batch:
-            for question in valid_questions:
-                batch.put_item(
-                    Item={
-                        "question_id": str(uuid4()),
-                        "set_id": set_id,
-                        "question": question["question"],
-                        "options": question["options"],
-                        "correct_index": question["correct_index"],
-                        "explanation": question["explanation"],
-                        "topics": question["topics"],
-                        "difficulty": question["difficulty"],
-                    }
-                )
-
-        for document_id in normalized_document_ids:
-            result = _documents_table.get_item(Key={"document_id": document_id})
-            existing_item = result.get("Item", {})
-            if existing_item.get("processing_status") == "GENERATED":
-                logger.info("Document already GENERATED document_id=%s", document_id)
-                continue
-            _documents_table.update_item(
-                Key={"document_id": document_id},
-                UpdateExpression="SET processing_status = :status",
-                ExpressionAttributeValues={":status": "GENERATED"},
-            )
-
-        logger.info(
-            "Persisted question set document_ids=%s set_id=%s inserted=%s",
-            normalized_document_ids,
-            set_id,
-            len(valid_questions),
-        )
         return _response(
-            200,
+            202,
             {
-                "message": "Questions generated successfully",
-                "set_id": set_id,
+                "message": "Question generation started",
                 "course_id": course_id,
-                "documents_processed": len(normalized_document_ids),
-                "inserted_questions": len(valid_questions),
-                "discarded_questions": discarded_count,
+                "documents_queued": len(document_ids),
+                "request_id": correlation_id,
             },
         )
     except Exception as exc:
-        logger.exception("Unhandled error in generate_questions for event")
+        logger.exception("cid=%s unhandled_error", correlation_id)
         return _response(500, {"message": "Internal server error", "error": str(exc)})

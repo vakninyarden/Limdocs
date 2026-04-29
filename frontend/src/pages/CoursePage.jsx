@@ -6,12 +6,14 @@ import { useLanguageControl } from '../language-control/LanguageControlProvider.
 import { deleteCourse } from '../services/coursesService.js'
 import {
   deleteDocument,
+  generateQuiz,
   getCourseDocuments,
   getUploadUrl,
   uploadFileToS3,
 } from '../services/documentsService.js'
 
-const FINAL_PROCESSING_STATUSES = new Set(['EXTRACTED', 'FAILED'])
+const FINAL_PROCESSING_STATUSES = new Set(['EXTRACTED', 'GENERATED', 'FAILED'])
+const QUIZ_ELIGIBLE_STATUSES = new Set(['EXTRACTED', 'GENERATED', 'FAILED'])
 
 function fileKey(file) {
   return `${file.name}-${file.size}-${file.lastModified}`
@@ -70,6 +72,10 @@ export default function CoursePage() {
   const [uploadProgress, setUploadProgress] = useState(null)
   const [uploadError, setUploadError] = useState(null)
   const [uploadSuccess, setUploadSuccess] = useState(false)
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedDocIds, setSelectedDocIds] = useState([])
+  const [isGeneratingQuiz, setIsGeneratingQuiz] = useState(false)
+  const [quizStartedNotice, setQuizStartedNotice] = useState(null)
   const fileInputRef = useRef(null)
   const dragDepthRef = useRef(0)
 
@@ -113,6 +119,27 @@ export default function CoursePage() {
     if (authStatus !== 'authed' || !courseId || activeTab !== 'materials') return
     loadDocuments()
   }, [authStatus, courseId, activeTab, loadDocuments])
+
+  const eligibleDocIds = documents.reduce((acc, doc, index) => {
+    const id = String(doc.document_id ?? doc.documentId ?? `doc-${index}`)
+    const status = normalizeProcessingStatus(doc.processing_status ?? doc.processingStatus)
+    if (QUIZ_ELIGIBLE_STATUSES.has(status)) {
+      acc.push(id)
+    }
+    return acc
+  }, [])
+
+  useEffect(() => {
+    if (selectedDocIds.length === 0) return
+    const eligibleSet = new Set(eligibleDocIds)
+    setSelectedDocIds((prev) => {
+      const next = prev.filter((id) => eligibleSet.has(id))
+      if (next.length === prev.length && next.every((id, index) => id === prev[index])) {
+        return prev
+      }
+      return next
+    })
+  }, [eligibleDocIds, selectedDocIds.length])
 
   useEffect(() => {
     if (authStatus !== 'authed' || !courseId || activeTab !== 'materials') return undefined
@@ -247,6 +274,14 @@ export default function CoursePage() {
   }, [isDeleteModalOpen, deletingDocId, closeDeleteModal])
 
   useEffect(() => {
+    if (!quizStartedNotice) return undefined
+    const timer = window.setTimeout(() => {
+      setQuizStartedNotice(null)
+    }, 3500)
+    return () => window.clearTimeout(timer)
+  }, [quizStartedNotice])
+
+  useEffect(() => {
     if (!uploadSuccess || !isUploadModalOpen) return undefined
     const timer = window.setTimeout(() => {
       closeUploadModal()
@@ -322,8 +357,63 @@ export default function CoursePage() {
     }
   }
 
+  const toggleSelectionMode = () => {
+    if (isGeneratingQuiz) return
+    setSelectionMode((prev) => {
+      if (prev) {
+        setSelectedDocIds([])
+      }
+      return !prev
+    })
+  }
+
+  const toggleDocSelection = (docId) => {
+    if (!selectionMode || isGeneratingQuiz) return
+    setSelectedDocIds((prev) =>
+      prev.includes(docId) ? prev.filter((existingId) => existingId !== docId) : [...prev, docId],
+    )
+  }
+
+  const handleGenerateQuiz = async () => {
+    if (!courseId || selectedDocIds.length === 0 || isGeneratingQuiz) return
+
+    setDocumentsError(null)
+    setDocumentsNotice(null)
+    setQuizStartedNotice(null)
+    setIsGeneratingQuiz(true)
+    try {
+      const session = await fetchAuthSession()
+      const idToken = session.tokens?.idToken?.toString()
+      if (!idToken) {
+        throw new Error(t.coursePage.uploadMissingSession)
+      }
+      await generateQuiz(courseId, selectedDocIds, idToken)
+      setSelectionMode(false)
+      setSelectedDocIds([])
+      setQuizStartedNotice(t.coursePage.quizGenerationSuccess)
+      await loadDocuments()
+    } catch (err) {
+      let message = t.coursePage.quizGenerationError
+      const apiMsg = err?.response?.data?.message
+      if (typeof apiMsg === 'string' && apiMsg.trim()) {
+        message = apiMsg.trim()
+      } else if (typeof err?.message === 'string' && err.message.includes('VITE_API_URL')) {
+        message = t.coursePage.uploadApiNotConfigured
+      } else if (typeof err?.message === 'string' && err.message.trim()) {
+        message = err.message.trim()
+      }
+      setDocumentsError(message)
+    } finally {
+      setIsGeneratingQuiz(false)
+    }
+  }
+
   return (
-    <main className="course-page" dir={dir} lang={lang}>
+    <main
+      className={`course-page ${selectedDocIds.length > 0 ? 'course-page--with-action-bar' : ''}`}
+      dir={dir}
+      lang={lang}
+    >
       <div className="course-page__top-bar">
         <button
           type="button"
@@ -385,27 +475,45 @@ export default function CoursePage() {
                 <h2 className="course-page__materials-heading course-page__materials-heading--panel">
                   {t.coursePage.materialsHeading}
                 </h2>
-                <button
-                  type="button"
-                  className="course-page__upload-btn"
-                  onClick={() => {
-                    setUploadError(null)
-                    setUploadSuccess(false)
-                    setIsUploadModalOpen(true)
-                  }}
-                >
-                  {t.coursePage.uploadMaterial}
-                </button>
-                <button
-                  type="button"
-                  className="course-page__modal-cancel course-page__delete-course-btn"
-                  onClick={() => {
-                    setDeleteCourseError(null)
-                    setIsDeleteCourseModalOpen(true)
-                  }}
-                >
-                  {t.coursePage.deleteCourseLabel}
-                </button>
+                <div className="course-page__materials-actions">
+                  <button
+                    type="button"
+                    className={`course-page__quiz-btn ${selectionMode ? 'course-page__quiz-btn--active' : ''}`}
+                    onClick={toggleSelectionMode}
+                    disabled={isGeneratingQuiz}
+                  >
+                    <span className="course-page__quiz-btn-icon" aria-hidden>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                        <path
+                          d="M12 3.75l1.64 3.323 3.668.533-2.654 2.587.626 3.652L12 12.12l-3.28 1.725.626-3.652-2.654-2.587 3.668-.533L12 3.75Zm6.25 10 1.1 2.23 2.46.357-1.78 1.736.42 2.451-2.2-1.157-2.2 1.157.42-2.451-1.78-1.736 2.46-.357 1.1-2.23Zm-12.5 0 1.1 2.23 2.46.357-1.78 1.736.42 2.451-2.2-1.157-2.2 1.157.42-2.451-1.78-1.736 2.46-.357 1.1-2.23Z"
+                          fill="currentColor"
+                        />
+                      </svg>
+                    </span>
+                    {selectionMode ? t.coursePage.quizSelectionCancel : t.coursePage.newPracticeQuiz}
+                  </button>
+                  <button
+                    type="button"
+                    className="course-page__upload-btn"
+                    onClick={() => {
+                      setUploadError(null)
+                      setUploadSuccess(false)
+                      setIsUploadModalOpen(true)
+                    }}
+                  >
+                    {t.coursePage.uploadMaterial}
+                  </button>
+                  <button
+                    type="button"
+                    className="course-page__modal-cancel course-page__delete-course-btn"
+                    onClick={() => {
+                      setDeleteCourseError(null)
+                      setIsDeleteCourseModalOpen(true)
+                    }}
+                  >
+                    {t.coursePage.deleteCourseLabel}
+                  </button>
+                </div>
               </div>
 
               {documentsLoading ? (
@@ -429,6 +537,12 @@ export default function CoursePage() {
                 </p>
               ) : null}
 
+              {quizStartedNotice && !documentsLoading ? (
+                <p className="course-page__documents-notice" role="status">
+                  {quizStartedNotice}
+                </p>
+              ) : null}
+
               {showDocEmpty ? (
                 <p className="course-page__materials-empty">{t.coursePage.documentsListEmpty}</p>
               ) : null}
@@ -447,6 +561,10 @@ export default function CoursePage() {
                     const statusLabel =
                       normalizedStatus === 'UPLOADED'
                         ? t.coursePage.statusProcessing
+                        : normalizedStatus === 'GENERATING'
+                          ? t.coursePage.statusGenerating
+                        : normalizedStatus === 'GENERATED'
+                          ? t.coursePage.statusGenerated
                         : normalizedStatus === 'EXTRACTED'
                           ? t.coursePage.statusReady
                           : normalizedStatus === 'FAILED'
@@ -457,12 +575,27 @@ export default function CoursePage() {
                         ? 'ready'
                         : normalizedStatus === 'FAILED'
                           ? 'failed'
-                          : normalizedStatus === 'UPLOADED'
+                          : normalizedStatus === 'UPLOADED' || normalizedStatus === 'GENERATING'
                             ? 'processing'
                             : 'default'
                     const deletingThisDoc = deletingDocId === String(id)
+                    const docId = String(id)
+                    const isQuizEligible = QUIZ_ELIGIBLE_STATUSES.has(normalizedStatus)
+                    const isSelected = selectedDocIds.includes(docId)
                     return (
                       <li key={String(id)} className="course-page__doc-card">
+                        {selectionMode && isQuizEligible ? (
+                          <label className="course-page__doc-select" aria-label={tx(t.coursePage.quizSelectDocAria, { name })}>
+                            <input
+                              type="checkbox"
+                              className="course-page__doc-select-input"
+                              checked={isSelected}
+                              onChange={() => toggleDocSelection(docId)}
+                              disabled={isGeneratingQuiz}
+                            />
+                            <span className="course-page__doc-select-checkmark" aria-hidden />
+                          </label>
+                        ) : null}
                         <div className="course-page__doc-card-main">
                           <span className="course-page__doc-card-name" title={String(name)}>
                             {String(name)}
@@ -498,7 +631,7 @@ export default function CoursePage() {
                           <button
                             type="button"
                             className="course-page__doc-delete-btn"
-                            disabled={Boolean(deletingDocId)}
+                            disabled={Boolean(deletingDocId) || isGeneratingQuiz}
                             onClick={() => handleDeleteClick(doc, id)}
                             aria-label={tx(t.coursePage.deleteDocumentAria, { name })}
                           >
@@ -810,6 +943,21 @@ export default function CoursePage() {
               </button>
             </div>
           </section>
+        </div>
+      ) : null}
+      {selectedDocIds.length > 0 ? (
+        <div className="course-page__quiz-action-bar" role="status" aria-live="polite">
+          <p className="course-page__quiz-action-count">
+            {tx(t.coursePage.quizSelectedCount, { count: selectedDocIds.length })}
+          </p>
+          <button
+            type="button"
+            className="course-page__quiz-generate-btn"
+            onClick={handleGenerateQuiz}
+            disabled={isGeneratingQuiz || selectedDocIds.length === 0}
+          >
+            {isGeneratingQuiz ? t.coursePage.quizGenerating : t.coursePage.quizGenerate}
+          </button>
         </div>
       ) : null}
     </main>

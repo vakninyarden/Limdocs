@@ -2,6 +2,12 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: Limdocs backend stack (Cognito, DynamoDB, API, Lambda)
 
+Parameters:
+  OpenAIApiKey:
+    Type: String
+    NoEcho: true
+    Description: "OpenAI API Key provided during deploy"
+
 Resources:
   LimdocsUserPool:
     Type: AWS::Cognito::UserPool
@@ -351,7 +357,15 @@ Resources:
       CodeUri: src/
       Handler: generate_questions.lambda_handler
       Runtime: python3.9
-      Timeout: 60
+      Timeout: 300
+      MemorySize: 512
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: "lambda:InvokeFunction"
+              Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${GenerateQuestionsFunction}"
+      # IAM check: LabRole must include lambda:InvokeFunction on this function ARN
+      # to support async self-invocation from API mode to worker mode.
       Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
       Environment:
         Variables:
@@ -359,8 +373,8 @@ Resources:
           QUESTION_SETS_TABLE: !Ref QuestionSetsTable
           DOCUMENTS_TABLE: !Ref DocumentsTable
           PROCESSED_BUCKET: !Ref ProcessedOutputsBucket
-          OPENAI_API_KEY: "PLACEHOLDER_FOR_SECRET"
-          OPENAI_MODEL_NAME: "PLACEHOLDER_MODEL_NAME"
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_MODEL_NAME: "gpt-4.1-mini"
       Events:
         ApiEvent:
           Type: Api

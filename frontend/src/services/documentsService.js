@@ -112,3 +112,37 @@ export async function uploadFileToS3(uploadUrl, file, fileType) {
     maxContentLength: Infinity,
   })
 }
+
+/**
+ * @param {string} courseId
+ * @param {string[]} documentIds
+ * @param {string} idToken Cognito ID token (JWT)
+ * @returns {Promise<Record<string, unknown>>}
+ */
+export async function generateQuiz(courseId, documentIds, idToken) {
+  if (!apiBaseUrl) {
+    throw new Error('API is not configured. Set VITE_API_URL.')
+  }
+  if (!courseId) {
+    throw new Error('Missing courseId.')
+  }
+  if (!Array.isArray(documentIds) || documentIds.length === 0) {
+    throw new Error('Missing documentIds.')
+  }
+  if (!idToken) {
+    throw new Error('Missing idToken.')
+  }
+
+  const response = await axios.post(
+    `${apiBaseUrl}/courses/${encodeURIComponent(courseId)}/generate-quiz`,
+    { documentIds },
+    {
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+        'Content-Type': 'application/json',
+      },
+    },
+  )
+
+  return response?.data ?? {}
+}

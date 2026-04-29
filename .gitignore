@@ -6,3 +6,5 @@ frontend/dist
 # Local environment (never commit secrets)
 .env.local
 frontend/.env.local
+samconfig.toml
+backend/samconfig.toml
