@@ -220,6 +220,7 @@ Resources:
       CodeUri: src/
       Handler: process_document.lambda_handler
       Runtime: python3.9
+      Timeout: 300
       # LabRole must include:
       # - s3:GetObject on RawUploadsBucket objects
       # - s3:PutObject on ProcessedOutputsBucket objects
@@ -269,6 +270,7 @@ Resources:
         Variables:
           DOCUMENTS_TABLE: !Ref DocumentsTable
           UPLOAD_BUCKET: !Ref RawUploadsBucket
+          PROCESSED_BUCKET: !Ref ProcessedOutputsBucket
       Events:
         ApiEvent:
           Type: Api
@@ -290,6 +292,7 @@ Resources:
           COURSES_TABLE: !Ref LimdocsCoursesTable
           DOCUMENTS_TABLE: !Ref DocumentsTable
           UPLOAD_BUCKET: !Ref RawUploadsBucket
+          PROCESSED_BUCKET: !Ref ProcessedOutputsBucket
           INDEX_NAME: CourseIdIndex
       Events:
         ApiEvent:

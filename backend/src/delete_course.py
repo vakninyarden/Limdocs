@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 
 import boto3
@@ -8,12 +9,15 @@ from boto3.dynamodb.conditions import Key
 COURSES_TABLE = os.environ["COURSES_TABLE"]
 DOCUMENTS_TABLE = os.environ["DOCUMENTS_TABLE"]
 UPLOAD_BUCKET = os.environ["UPLOAD_BUCKET"]
+PROCESSED_BUCKET = os.environ["PROCESSED_BUCKET"]
 INDEX_NAME = os.environ["INDEX_NAME"]
 
 _dynamodb = boto3.resource("dynamodb")
 _courses_table = _dynamodb.Table(COURSES_TABLE)
 _documents_table = _dynamodb.Table(DOCUMENTS_TABLE)
 _s3 = boto3.client("s3")
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 _CORS_HEADERS = {
     "Content-Type": "application/json",
@@ -29,6 +33,22 @@ def _response(status_code, payload):
         "headers": _CORS_HEADERS,
         "body": json.dumps(payload),
     }
+
+
+def _delete_object_safe(bucket, key):
+    if not key:
+        return
+    try:
+        logger.info("Deleting S3 object bucket=%s key=%s", bucket, key)
+        _s3.delete_object(Bucket=bucket, Key=key)
+    except Exception as exc:
+        # Missing objects should not block metadata cleanup; log and continue.
+        logger.warning(
+            "Failed deleting S3 object bucket=%s key=%s error=%s",
+            bucket,
+            key,
+            str(exc),
+        )
 
 
 def lambda_handler(event, context):
@@ -64,25 +84,16 @@ def lambda_handler(event, context):
         for doc in documents:
             document_id = doc.get("document_id")
             s3_raw_key = doc.get("s3_raw_key")
-            if not document_id or not s3_raw_key:
+            s3_processed_key = doc.get("s3_processed_key")
+            if not document_id:
                 return _response(
                     500,
                     {"message": "Failed to delete course assets due to invalid document metadata"},
                 )
 
-            try:
-                _s3.delete_object(Bucket=UPLOAD_BUCKET, Key=s3_raw_key)
-                _documents_table.delete_item(Key={"document_id": document_id})
-                # TODO: When Textract pipeline artifacts are added, also delete processed outputs here.
-            except Exception as exc:
-                # Keep the course record when any child cleanup fails, so users can retry safely.
-                return _response(
-                    500,
-                    {
-                        "message": "Failed to fully delete course documents. Please retry.",
-                        "error": str(exc),
-                    },
-                )
+            _delete_object_safe(UPLOAD_BUCKET, s3_raw_key)
+            _delete_object_safe(PROCESSED_BUCKET, s3_processed_key)
+            _documents_table.delete_item(Key={"document_id": document_id})
 
         _courses_table.delete_item(Key={"course_id": course_id})
         return _response(200, {"message": "Course deleted successfully"})

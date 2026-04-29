@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 
 import boto3
@@ -6,9 +7,12 @@ import boto3
 
 DOCUMENTS_TABLE = os.environ["DOCUMENTS_TABLE"]
 UPLOAD_BUCKET = os.environ["UPLOAD_BUCKET"]
+PROCESSED_BUCKET = os.environ["PROCESSED_BUCKET"]
 _dynamodb = boto3.resource("dynamodb")
 _table = _dynamodb.Table(DOCUMENTS_TABLE)
 _s3 = boto3.client("s3")
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 _CORS_HEADERS = {
     "Content-Type": "application/json",
@@ -24,6 +28,22 @@ def _response(status_code, payload):
         "headers": _CORS_HEADERS,
         "body": json.dumps(payload),
     }
+
+
+def _delete_object_safe(bucket, key):
+    if not key:
+        return
+    try:
+        logger.info("Deleting S3 object bucket=%s key=%s", bucket, key)
+        _s3.delete_object(Bucket=bucket, Key=key)
+    except Exception as exc:
+        # Missing objects should not block metadata cleanup; log and continue.
+        logger.warning(
+            "Failed deleting S3 object bucket=%s key=%s error=%s",
+            bucket,
+            key,
+            str(exc),
+        )
 
 
 def lambda_handler(event, context):
@@ -55,22 +75,13 @@ def lambda_handler(event, context):
             return _response(403, {"message": "Forbidden"})
 
         s3_raw_key = item.get("s3_raw_key")
-        if not s3_raw_key:
-            return _response(500, {"message": "Document metadata missing storage key"})
+        s3_processed_key = item.get("s3_processed_key")
 
-        try:
-            # Keep storage and metadata consistent: delete object first, then metadata.
-            _s3.delete_object(Bucket=UPLOAD_BUCKET, Key=s3_raw_key)
-            _table.delete_item(Key={"document_id": document_id})
-            # TODO: When Textract pipeline is added, also delete generated artifacts from processed outputs bucket.
-        except Exception as exc:
-            return _response(
-                500,
-                {
-                    "message": "Failed to delete document assets",
-                    "error": str(exc),
-                },
-            )
+        # Attempt storage cleanup first, then remove metadata regardless of missing objects.
+        _delete_object_safe(UPLOAD_BUCKET, s3_raw_key)
+        _delete_object_safe(PROCESSED_BUCKET, s3_processed_key)
+
+        _table.delete_item(Key={"document_id": document_id})
 
         return _response(200, {"message": "Document deleted successfully"})
     except Exception as exc:
