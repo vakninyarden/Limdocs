@@ -133,16 +133,20 @@ Resources:
       AttributeDefinitions:
         - AttributeName: set_id
           AttributeType: S
-        - AttributeName: document_id
+        - AttributeName: course_id
+          AttributeType: S
+        - AttributeName: created_at
           AttributeType: S
       KeySchema:
         - AttributeName: set_id
           KeyType: HASH
       GlobalSecondaryIndexes:
-        - IndexName: DocumentIdIndex
+        - IndexName: CourseIdCreatedAtIndex
           KeySchema:
-            - AttributeName: document_id
+            - AttributeName: course_id
               KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
           Projection:
             ProjectionType: ALL
 
@@ -182,6 +186,19 @@ Resources:
         Authorizers:
           LimdocsAuth:
             UserPoolArn: !GetAtt LimdocsUserPool.Arn
+      GatewayResponses:
+        DEFAULT_4XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              Access-Control-Allow-Methods: "'*'"
+        DEFAULT_5XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              Access-Control-Allow-Methods: "'*'"
 
   CreateUserFunction:
     Type: AWS::Serverless::Function
@@ -303,7 +320,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref LimdocsApi
-            Path: /courses/{courseId}/documents
+            Path: /courses/{courseId}/materials
             Method: get
 
   DeleteCourseDocumentFunction:
@@ -382,6 +399,40 @@ Resources:
             RestApiId: !Ref LimdocsApi
             Path: /courses/{courseId}/generate-quiz
             Method: post
+
+  GetQuestionsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: limdocs-get-questions
+      CodeUri: src/
+      Handler: get_questions.lambda_handler
+      Runtime: python3.9
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Environment:
+        Variables:
+          QUESTION_SETS_TABLE: !Ref QuestionSetsTable
+          QUESTIONS_TABLE: !Ref QuestionsTable
+          QUESTION_SETS_COURSE_INDEX: CourseIdCreatedAtIndex
+          QUESTIONS_SET_INDEX: SetIdIndex
+      Events:
+        ListQuestionSets:
+          Type: Api
+          Properties:
+            RestApiId: !Ref LimdocsApi
+            Path: /courses/{courseId}/question-sets
+            Method: get
+        GetQuestionSet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref LimdocsApi
+            Path: /courses/{courseId}/question-sets/{setId}
+            Method: get
+        DeleteQuestionSet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref LimdocsApi
+            Path: /courses/{courseId}/question-sets/{setId}
+            Method: delete
 
 Outputs:
   UserPoolId:

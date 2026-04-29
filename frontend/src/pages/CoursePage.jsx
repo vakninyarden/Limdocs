@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { fetchAuthSession, getCurrentUser } from 'aws-amplify/auth'
 import './CoursePage.css'
 import { useLanguageControl } from '../language-control/LanguageControlProvider.jsx'
-import { deleteCourse } from '../services/coursesService.js'
+import { deleteCourse, getUserCourses } from '../services/coursesService.js'
 import {
   deleteDocument,
+  deleteQuestionSet,
   generateQuiz,
   getCourseDocuments,
+  getQuestionSetDetails,
+  getQuestionSets,
   getUploadUrl,
   uploadFileToS3,
 } from '../services/documentsService.js'
@@ -51,6 +54,7 @@ function normalizeProcessingStatus(status) {
 export default function CoursePage() {
   const navigate = useNavigate()
   const location = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { courseId: courseIdParam } = useParams()
   const { t, lang, setLang, dir, tx } = useLanguageControl()
   const [authStatus, setAuthStatus] = useState('loading')
@@ -78,14 +82,67 @@ export default function CoursePage() {
   const [quizError, setQuizError] = useState(null)
   const [quizStartedNotice, setQuizStartedNotice] = useState(null)
   const [quizOverlayMessageIndex, setQuizOverlayMessageIndex] = useState(0)
+  const [questionSets, setQuestionSets] = useState([])
+  const [questionSetsLoading, setQuestionSetsLoading] = useState(false)
+  const [questionSetsError, setQuestionSetsError] = useState(null)
+  const [selectedQuestionSet, setSelectedQuestionSet] = useState(null)
+  const [setQuestions, setSetQuestions] = useState([])
+  const [setQuestionsLoading, setSetQuestionsLoading] = useState(false)
+  const [setQuestionsError, setSetQuestionsError] = useState(null)
+  const [questionMode, setQuestionMode] = useState('review')
+  const [practiceAnswers, setPracticeAnswers] = useState({})
+  const [setPendingDelete, setSetPendingDelete] = useState(null)
+  const [isDeletingSet, setIsDeletingSet] = useState(false)
+  const [questionSetsNotice, setQuestionSetsNotice] = useState(null)
   const fileInputRef = useRef(null)
   const dragDepthRef = useRef(0)
 
-  const courseNameFromState =
+  const initialCourseName =
     typeof location.state?.courseName === 'string' ? location.state.courseName.trim() : ''
-
-  const displayCourseName = courseNameFromState || t.home.untitledCourse
+  const [courseName, setCourseName] = useState(initialCourseName)
+  const displayCourseName = courseName || t.home.untitledCourse
   const courseId = courseIdParam?.trim() ?? ''
+
+  useEffect(() => {
+    if (!initialCourseName || initialCourseName === courseName) return
+    setCourseName(initialCourseName)
+  }, [initialCourseName, courseName])
+
+  useEffect(() => {
+    if (!courseId || courseName) return
+    let cancelled = false
+
+    ;(async () => {
+      try {
+        const user = await getCurrentUser()
+        const userId = String(user?.userId ?? '').trim()
+        if (!userId) return
+        const session = await fetchAuthSession()
+        const idToken = session.tokens?.idToken?.toString()
+        if (!idToken) return
+        const courses = await getUserCourses(userId, idToken)
+        if (cancelled) return
+        const matchedCourse = Array.isArray(courses)
+          ? courses.find((course) => {
+              const id = String(course?.course_id ?? course?.id ?? course?.courseId ?? '').trim()
+              return id === courseId
+            })
+          : null
+        const fallbackName = String(
+          matchedCourse?.course_name ?? matchedCourse?.name ?? '',
+        ).trim()
+        if (fallbackName) {
+          setCourseName(fallbackName)
+        }
+      } catch {
+        // Keep UI fallback title when metadata fetch fails.
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [courseId, courseName])
 
   const loadDocuments = useCallback(async () => {
     if (!courseId) return
@@ -117,10 +174,78 @@ export default function CoursePage() {
     }
   }, [courseId, t])
 
+  const loadQuestionSets = useCallback(async () => {
+    if (!courseId) return
+    setQuestionSetsLoading(true)
+    setQuestionSetsError(null)
+    try {
+      const session = await fetchAuthSession()
+      const idToken = session.tokens?.idToken?.toString()
+      if (!idToken) {
+        setQuestionSets([])
+        setQuestionSetsError(t.coursePage.uploadMissingSession)
+        return
+      }
+      const sets = await getQuestionSets(courseId, idToken)
+      setQuestionSets(sets)
+    } catch (err) {
+      const apiMsg = err?.response?.data?.message
+      setQuestionSetsError(
+        typeof apiMsg === 'string' && apiMsg.trim()
+          ? apiMsg.trim()
+          : t.coursePage.questionSetsLoadError,
+      )
+      setQuestionSets([])
+    } finally {
+      setQuestionSetsLoading(false)
+    }
+  }, [courseId, t])
+
+  const loadQuestionSetDetails = useCallback(
+    async (setId) => {
+      if (!courseId || !setId) return
+      setSetQuestionsLoading(true)
+      setSetQuestionsError(null)
+      try {
+        const session = await fetchAuthSession()
+        const idToken = session.tokens?.idToken?.toString()
+        if (!idToken) {
+          setSetQuestions([])
+          setSetQuestionsError(t.coursePage.uploadMissingSession)
+          return
+        }
+        const payload = await getQuestionSetDetails(courseId, setId, idToken)
+        setSelectedQuestionSet(payload?.set ?? null)
+        setSetQuestions(Array.isArray(payload?.questions) ? payload.questions : [])
+        setPracticeAnswers({})
+      } catch (err) {
+        const apiMsg = err?.response?.data?.message
+        setSetQuestionsError(
+          typeof apiMsg === 'string' && apiMsg.trim()
+            ? apiMsg.trim()
+            : t.coursePage.questionSetLoadError,
+        )
+      } finally {
+        setSetQuestionsLoading(false)
+      }
+    },
+    [courseId, t],
+  )
+
   useEffect(() => {
     if (authStatus !== 'authed' || !courseId || activeTab !== 'materials') return
     loadDocuments()
   }, [authStatus, courseId, activeTab, loadDocuments])
+
+  useEffect(() => {
+    if (authStatus !== 'authed' || !courseId || activeTab !== 'questionSets') return
+    loadQuestionSets()
+  }, [authStatus, courseId, activeTab, loadQuestionSets])
+
+  useEffect(() => {
+    if (authStatus !== 'authed' || activeTab !== 'questionSets' || !selectedQuestionSet?.set_id) return
+    loadQuestionSetDetails(selectedQuestionSet.set_id)
+  }, [authStatus, activeTab, selectedQuestionSet?.set_id, loadQuestionSetDetails])
 
   const eligibleDocIds = documents.reduce((acc, doc, index) => {
     const id = String(doc.document_id ?? doc.documentId ?? `doc-${index}`)
@@ -144,7 +269,7 @@ export default function CoursePage() {
   }, [eligibleDocIds, selectedDocIds.length])
 
   useEffect(() => {
-    if (authStatus !== 'authed' || !courseId || activeTab !== 'materials') return undefined
+    if (authStatus !== 'authed' || !courseId) return undefined
 
     const hasNonFinalDocuments = documents.some((doc) => {
       const status = normalizeProcessingStatus(doc.processing_status ?? doc.processingStatus)
@@ -158,7 +283,7 @@ export default function CoursePage() {
     }, 7000)
 
     return () => window.clearInterval(intervalId)
-  }, [authStatus, courseId, activeTab, documents, loadDocuments])
+  }, [authStatus, courseId, documents, loadDocuments])
 
   const closeUploadModal = useCallback(() => {
     dragDepthRef.current = 0
@@ -258,6 +383,25 @@ export default function CoursePage() {
   }, [])
 
   useEffect(() => {
+    const tabParam = searchParams.get('tab')
+    const setParam = searchParams.get('set')
+    if (tabParam === 'questionSets' && activeTab !== 'questionSets') {
+      setActiveTab('questionSets')
+    } else if (tabParam !== 'questionSets' && activeTab !== 'materials') {
+      setActiveTab('materials')
+    }
+    if (setParam && setParam !== selectedQuestionSet?.set_id) {
+      setSelectedQuestionSet((prev) => (prev?.set_id === setParam ? prev : { set_id: setParam }))
+    }
+    if (!setParam && selectedQuestionSet?.set_id) {
+      setSelectedQuestionSet(null)
+      setSetQuestions([])
+      setSetQuestionsError(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
+  useEffect(() => {
     if (!isUploadModalOpen) return undefined
     const onKeyDown = (e) => {
       if (e.key === 'Escape' && !isUploading) closeUploadModal()
@@ -265,6 +409,27 @@ export default function CoursePage() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [isUploadModalOpen, isUploading, closeUploadModal])
+
+  useEffect(() => {
+    const nextParams = new URLSearchParams(searchParams)
+    if (activeTab === 'questionSets') {
+      nextParams.set('tab', 'questionSets')
+      if (selectedQuestionSet?.set_id) {
+        nextParams.set('set', selectedQuestionSet.set_id)
+      } else {
+        nextParams.delete('set')
+      }
+    } else {
+      nextParams.delete('tab')
+      nextParams.delete('set')
+    }
+    if (nextParams.toString() !== searchParams.toString()) {
+      setSearchParams(nextParams, {
+        replace: true,
+        state: location.state,
+      })
+    }
+  }, [activeTab, selectedQuestionSet?.set_id, searchParams, setSearchParams, location.state])
 
   useEffect(() => {
     if (!isDeleteModalOpen) return undefined
@@ -411,6 +576,11 @@ export default function CoursePage() {
       setSelectedDocIds([])
       setQuizStartedNotice(t.coursePage.success)
       await loadDocuments()
+      await loadQuestionSets()
+      setQuestionSetsNotice(null)
+      setQuestionSetsError(null)
+      setSetQuestionsError(null)
+      setActiveTab('questionSets')
     } catch (err) {
       let message = t.coursePage.quizGenerationFailed
       const apiMsg = err?.response?.data?.message
@@ -432,6 +602,57 @@ export default function CoursePage() {
     t.coursePage.quizOverlayMessage2,
     t.coursePage.quizOverlayMessage3,
   ]
+
+  const formatDifficultySummary = (setItem) => {
+    const breakdown = setItem?.difficulty_breakdown ?? setItem?.difficultyBreakdown ?? {}
+    const easy = Number(breakdown.easy ?? 0)
+    const medium = Number(breakdown.medium ?? 0)
+    const hard = Number(breakdown.hard ?? 0)
+    const derivedTotal = easy + medium + hard
+    const total = Number(setItem?.question_count ?? setItem?.questionCount ?? derivedTotal ?? 0)
+    return tx(t.coursePage.questionSetDifficultySummary, {
+      total,
+      easy,
+      medium,
+      hard,
+      easyLabel: t.coursePage.difficultyEasy,
+      mediumLabel: t.coursePage.difficultyMedium,
+      hardLabel: t.coursePage.difficultyHard,
+    })
+  }
+
+  const handleOpenSet = (setItem) => {
+    setQuestionMode('review')
+    setPracticeAnswers({})
+    setSetQuestionsError(null)
+    setSelectedQuestionSet(setItem)
+  }
+
+  const handleDeleteSet = async () => {
+    if (!setPendingDelete?.set_id || !courseId || isDeletingSet) return
+    setIsDeletingSet(true)
+    setQuestionSetsError(null)
+    try {
+      const session = await fetchAuthSession()
+      const idToken = session.tokens?.idToken?.toString()
+      if (!idToken) throw new Error(t.coursePage.uploadMissingSession)
+      await deleteQuestionSet(courseId, setPendingDelete.set_id, idToken)
+      setQuestionSets((prev) => prev.filter((setItem) => setItem.set_id !== setPendingDelete.set_id))
+      if (selectedQuestionSet?.set_id === setPendingDelete.set_id) {
+        setSelectedQuestionSet(null)
+        setSetQuestions([])
+      }
+      setQuestionSetsNotice(t.coursePage.deleteSetSuccess)
+      setSetPendingDelete(null)
+    } catch (err) {
+      const apiMsg = err?.response?.data?.message
+      setQuestionSetsError(
+        typeof apiMsg === 'string' && apiMsg.trim() ? apiMsg.trim() : t.coursePage.deleteSetError,
+      )
+    } finally {
+      setIsDeletingSet(false)
+    }
+  }
 
   return (
     <main
@@ -489,6 +710,16 @@ export default function CoursePage() {
               aria-current={activeTab === 'materials' ? 'page' : undefined}
             >
               {t.coursePage.tabMaterials}
+            </button>
+            <button
+              type="button"
+              className={`course-page__inner-nav-item ${
+                activeTab === 'questionSets' ? 'course-page__inner-nav-item--active' : ''
+              }`}
+              onClick={() => setActiveTab('questionSets')}
+              aria-current={activeTab === 'questionSets' ? 'page' : undefined}
+            >
+              {t.coursePage.tabQuestionSets}
             </button>
           </div>
         </nav>
@@ -666,6 +897,173 @@ export default function CoursePage() {
                   })}
                 </ul>
               ) : null}
+            </section>
+          ) : null}
+          {activeTab === 'questionSets' ? (
+            <section aria-label={t.coursePage.questionSetsSectionLabel}>
+              <div className="course-page__materials-header">
+                <h2 className="course-page__materials-heading course-page__materials-heading--panel">
+                  {t.coursePage.questionSetsHeading}
+                </h2>
+              </div>
+              {questionSetsError ? (
+                <p className="course-page__documents-error" role="alert">
+                  {questionSetsError}
+                </p>
+              ) : null}
+              {questionSetsNotice ? (
+                <p className="course-page__documents-notice" role="status">
+                  {questionSetsNotice}
+                </p>
+              ) : null}
+              {!selectedQuestionSet ? (
+                <>
+                  {questionSetsLoading ? (
+                    <div className="course-page__documents-skeleton" aria-busy="true">
+                      <div className="course-page__documents-skeleton-row" />
+                      <div className="course-page__documents-skeleton-row" />
+                    </div>
+                  ) : null}
+                  {!questionSetsLoading && questionSets.length === 0 ? (
+                    <p className="course-page__materials-empty">{t.coursePage.questionSetsEmpty}</p>
+                  ) : null}
+                  {!questionSetsLoading && questionSets.length > 0 ? (
+                    <ul className="course-page__set-list">
+                      {questionSets.map((setItem) => (
+                        <li key={setItem.set_id} className="course-page__set-card">
+                          <button
+                            type="button"
+                            className="course-page__set-card-open"
+                            onClick={() => handleOpenSet(setItem)}
+                          >
+                            <p className="course-page__set-card-title">
+                              {setItem.name || setItem.set_name || t.coursePage.questionSetUntitled}
+                            </p>
+                            <p className="course-page__set-card-meta">
+                              {formatDocumentDate(setItem.created_at, lang)}
+                            </p>
+                            <p className="course-page__set-card-meta">{formatDifficultySummary(setItem)}</p>
+                            {Array.isArray(setItem.source_document_names) &&
+                            setItem.source_document_names.length > 0 ? (
+                              <p className="course-page__set-card-meta">
+                                {setItem.source_document_names.join(', ')}
+                              </p>
+                            ) : null}
+                          </button>
+                          <button
+                            type="button"
+                            className="course-page__set-delete-btn"
+                            onClick={() => setSetPendingDelete(setItem)}
+                            aria-label={tx(t.coursePage.deleteSetAria, {
+                              name: setItem.name || setItem.set_name || t.coursePage.questionSetUntitled,
+                            })}
+                          >
+                            <span aria-hidden>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                <path
+                                  d="M9 3.75h6m-7.5 3h9m-7.5 3.75v7.5m3-7.5v7.5m4.875-10.5-.662 9.272A2.25 2.25 0 0 1 13.97 21h-3.94a2.25 2.25 0 0 1-2.243-2.028L7.125 7.5"
+                                  stroke="currentColor"
+                                  strokeWidth="1.75"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </>
+              ) : (
+                <div className="course-page__set-detail">
+                  <div className="course-page__set-detail-top">
+                    <button
+                      type="button"
+                      className="course-page__back-btn"
+                      onClick={() => {
+                        setSelectedQuestionSet(null)
+                        setSetQuestions([])
+                      }}
+                    >
+                      {t.coursePage.backToSets}
+                    </button>
+                    <div className="course-page__mode-switch" role="group" aria-label={t.coursePage.modeSwitchAria}>
+                      <button
+                        type="button"
+                        className={`course-page__mode-btn ${questionMode === 'review' ? 'course-page__mode-btn--active' : ''}`}
+                        onClick={() => setQuestionMode('review')}
+                      >
+                        {t.coursePage.reviewMode}
+                      </button>
+                      <button
+                        type="button"
+                        className={`course-page__mode-btn ${questionMode === 'practice' ? 'course-page__mode-btn--active' : ''}`}
+                        onClick={() => setQuestionMode('practice')}
+                      >
+                        {t.coursePage.practiceMode}
+                      </button>
+                    </div>
+                  </div>
+                  {setQuestionsLoading ? (
+                    <p className="course-page__documents-state">{t.coursePage.questionSetLoading}</p>
+                  ) : null}
+                  {setQuestionsError ? (
+                    <p className="course-page__documents-error" role="alert">
+                      {setQuestionsError}
+                    </p>
+                  ) : null}
+                  {!setQuestionsLoading ? (
+                    <ol className="course-page__question-list">
+                      {setQuestions.map((question, index) => {
+                        const qid = String(question.question_id ?? question.questionId ?? `q-${index}`)
+                        const selectedIndex = practiceAnswers[qid]
+                        const shouldReveal = questionMode === 'review' || selectedIndex !== undefined
+                        return (
+                          <li key={qid} className="course-page__question-card">
+                            <p className="course-page__question-title">{question.question}</p>
+                            <ul className="course-page__question-options">
+                              {(Array.isArray(question.options) ? question.options : []).map((opt, optIndex) => {
+                                const isCorrect = Number(question.correct_index) === optIndex
+                                return (
+                                  <li key={`${qid}-${optIndex}`}>
+                                    <button
+                                      type="button"
+                                      className={`course-page__question-option ${
+                                        shouldReveal && isCorrect ? 'course-page__question-option--correct' : ''
+                                      }`}
+                                      onClick={() =>
+                                        setPracticeAnswers((prev) => ({
+                                          ...prev,
+                                          [qid]: optIndex,
+                                        }))
+                                      }
+                                      disabled={questionMode === 'review' || selectedIndex !== undefined}
+                                    >
+                                      {String.fromCharCode(65 + optIndex)}. {opt}
+                                    </button>
+                                  </li>
+                                )
+                              })}
+                            </ul>
+                            {shouldReveal ? (
+                              <>
+                                <p className="course-page__question-answer">
+                                  {t.coursePage.correctAnswer}:{' '}
+                                  {(question.options || [])[Number(question.correct_index)]}
+                                </p>
+                                <p className="course-page__question-explanation">
+                                  {t.coursePage.aiExplanation}: {question.explanation}
+                                </p>
+                              </>
+                            ) : null}
+                          </li>
+                        )
+                      })}
+                    </ol>
+                  ) : null}
+                </div>
+              )}
             </section>
           ) : null}
         </div>
@@ -952,6 +1350,50 @@ export default function CoursePage() {
                 {isDeletingCourse
                   ? t.coursePage.deleteCourseDeleting
                   : t.coursePage.deleteCourseConfirm}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {setPendingDelete ? (
+        <div
+          className="course-page__modal-backdrop"
+          role="presentation"
+          onClick={() => {
+            if (!isDeletingSet) setSetPendingDelete(null)
+          }}
+        >
+          <section
+            className="course-page__modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="course-delete-set-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="course-delete-set-modal-title" className="course-page__modal-title">
+              {t.coursePage.deleteSet}
+            </h2>
+            <p className="course-page__modal-subtitle">
+              {tx(t.coursePage.deleteSetConfirm, {
+                name: setPendingDelete.name || setPendingDelete.set_name || t.coursePage.questionSetUntitled,
+              })}
+            </p>
+            <div className="course-page__modal-actions">
+              <button
+                type="button"
+                className="course-page__modal-cancel"
+                onClick={() => setSetPendingDelete(null)}
+                disabled={isDeletingSet}
+              >
+                {t.home.cancel}
+              </button>
+              <button
+                type="button"
+                className="course-page__modal-submit course-page__modal-submit--danger"
+                onClick={handleDeleteSet}
+                disabled={isDeletingSet}
+              >
+                {isDeletingSet ? t.coursePage.deleteDeleting : t.coursePage.deleteSet}
               </button>
             </div>
           </section>

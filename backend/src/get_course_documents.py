@@ -10,18 +10,22 @@ INDEX_NAME = os.environ["INDEX_NAME"]
 _dynamodb = boto3.resource("dynamodb")
 _table = _dynamodb.Table(DOCUMENTS_TABLE)
 
-_CORS_HEADERS = {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "OPTIONS,GET,POST,PUT,DELETE",
-    "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token",
-}
+_CORS_ALLOW_HEADERS = "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token"
 
 
-def _response(status_code, payload):
+def _cors_headers(allow_methods="GET,OPTIONS"):
+    return {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": allow_methods,
+        "Access-Control-Allow-Headers": _CORS_ALLOW_HEADERS,
+    }
+
+
+def _response(status_code, payload, allow_methods="GET,OPTIONS"):
     return {
         "statusCode": status_code,
-        "headers": _CORS_HEADERS,
+        "headers": _cors_headers(allow_methods),
         "body": json.dumps(payload),
     }
 
@@ -29,6 +33,10 @@ def _response(status_code, payload):
 def lambda_handler(event, context):
     del context
     try:
+        method = (event.get("httpMethod") or "").upper()
+        if method == "OPTIONS":
+            return _response(200, {"message": "OK"}, allow_methods="GET,OPTIONS")
+
         claims = (
             event.get("requestContext", {})
             .get("authorizer", {})

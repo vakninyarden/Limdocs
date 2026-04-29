@@ -19,7 +19,7 @@ export async function getCourseDocuments(courseId, idToken) {
   }
 
   const response = await axios.get(
-    `${apiBaseUrl}/courses/${encodeURIComponent(courseId)}/documents`,
+    `${apiBaseUrl}/courses/${encodeURIComponent(courseId)}/materials`,
     {
       headers: {
         Authorization: `Bearer ${idToken}`,
@@ -144,5 +144,49 @@ export async function generateQuiz(courseId, documentIds, idToken) {
     },
   )
 
+  return response?.data ?? {}
+}
+
+export async function getQuestionSets(courseId, idToken) {
+  if (!apiBaseUrl) throw new Error('API is not configured. Set VITE_API_URL.')
+  if (!courseId) throw new Error('Missing courseId.')
+  if (!idToken) throw new Error('Missing idToken.')
+
+  const response = await axios.get(
+    `${apiBaseUrl}/courses/${encodeURIComponent(courseId)}/question-sets`,
+    {
+      headers: { Authorization: `Bearer ${idToken}` },
+    },
+  )
+  return Array.isArray(response?.data?.sets) ? response.data.sets : []
+}
+
+export async function getQuestionSetDetails(courseId, setId, idToken) {
+  if (!apiBaseUrl) throw new Error('API is not configured. Set VITE_API_URL.')
+  if (!courseId) throw new Error('Missing courseId.')
+  if (!setId) throw new Error('Missing setId.')
+  if (!idToken) throw new Error('Missing idToken.')
+
+  const response = await axios.get(
+    `${apiBaseUrl}/courses/${encodeURIComponent(courseId)}/question-sets/${encodeURIComponent(setId)}`,
+    {
+      headers: { Authorization: `Bearer ${idToken}` },
+    },
+  )
+  return response?.data ?? {}
+}
+
+export async function deleteQuestionSet(courseId, setId, idToken) {
+  if (!apiBaseUrl) throw new Error('API is not configured. Set VITE_API_URL.')
+  if (!courseId) throw new Error('Missing courseId.')
+  if (!setId) throw new Error('Missing setId.')
+  if (!idToken) throw new Error('Missing idToken.')
+
+  const response = await axios.delete(
+    `${apiBaseUrl}/courses/${encodeURIComponent(courseId)}/question-sets/${encodeURIComponent(setId)}`,
+    {
+      headers: { Authorization: `Bearer ${idToken}` },
+    },
+  )
   return response?.data ?? {}
 }

@@ -28,12 +28,7 @@ _documents_table = _dynamodb.Table(DOCUMENTS_TABLE)
 _questions_table = _dynamodb.Table(QUESTIONS_TABLE)
 _question_sets_table = _dynamodb.Table(QUESTION_SETS_TABLE)
 
-_CORS_HEADERS = {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "OPTIONS,GET,POST,PUT,DELETE",
-    "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token",
-}
+_CORS_ALLOW_HEADERS = "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token"
 
 _SYSTEM_PROMPT = (
     "You are an expert academic assistant. Generate 5 high-quality multiple-choice "
@@ -48,10 +43,15 @@ _SYSTEM_PROMPT = (
 )
 
 
-def _response(status_code, payload):
+def _response(status_code, payload, allow_methods="POST,OPTIONS"):
     return {
         "statusCode": status_code,
-        "headers": _CORS_HEADERS,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": allow_methods,
+            "Access-Control-Allow-Headers": _CORS_ALLOW_HEADERS,
+        },
         "body": json.dumps(payload, ensure_ascii=False),
     }
 
@@ -305,9 +305,24 @@ def _mark_quiz_generated(document_ids, correlation_id):
     )
 
 
+def _difficulty_breakdown(questions):
+    breakdown = {"easy": 0, "medium": 0, "hard": 0}
+    for question in questions:
+        level = str(question.get("difficulty") or "").strip().lower()
+        if level in breakdown:
+            breakdown[level] += 1
+    return breakdown
+
+
+def _default_set_name(created_at):
+    date_label = created_at[:10]
+    return f"Quiz from {date_label}"
+
+
 def _generate_questions_worker(course_id, document_ids, correlation_id):
     source_texts = []
     empty_text_document_ids = []
+    source_document_names = []
     for document_id in document_ids:
         result = _documents_table.get_item(Key={"document_id": document_id})
         item = result.get("Item")
@@ -316,6 +331,11 @@ def _generate_questions_worker(course_id, document_ids, correlation_id):
         processed_key = item.get("s3_processed_key")
         if not processed_key:
             raise ValueError(f"Document is not processed yet: {document_id}")
+        source_document_names.append(
+            item.get("original_file_name")
+            or item.get("originalFileName")
+            or f"Document {len(source_document_names) + 1}"
+        )
 
         s3_obj = _s3.get_object(Bucket=PROCESSED_BUCKET, Key=processed_key)
         source_text = s3_obj["Body"].read().decode("utf-8", errors="replace")
@@ -362,11 +382,18 @@ def _generate_questions_worker(course_id, document_ids, correlation_id):
 
     set_id = str(uuid4())
     created_at = datetime.now(timezone.utc).isoformat()
+    question_count = len(valid_questions)
+    default_set_name = _default_set_name(created_at)
     _question_sets_table.put_item(
         Item={
             "set_id": set_id,
             "document_ids": document_ids,
+            "source_document_names": source_document_names,
             "course_id": course_id,
+            "name": default_set_name,
+            "set_name": default_set_name,
+            "question_count": question_count,
+            "difficulty_breakdown": _difficulty_breakdown(valid_questions),
             "title": f"Combined Quiz - {len(document_ids)} Materials",
             "created_at": created_at,
         }
@@ -392,7 +419,7 @@ def _generate_questions_worker(course_id, document_ids, correlation_id):
         "cid=%s persisted_question_set set_id=%s inserted=%s discarded=%s",
         correlation_id,
         set_id,
-        len(valid_questions),
+        question_count,
         discarded_count,
     )
 
@@ -429,6 +456,10 @@ def lambda_handler(event, context):
                 _set_documents_status(document_ids, "READY", correlation_id)
                 raise
             return {"ok": True}
+
+        method = (event.get("httpMethod") or "").upper()
+        if method == "OPTIONS":
+            return _response(200, {"message": "OK"})
 
         parsed, error_response = _parse_api_request(event)
         if error_response:
