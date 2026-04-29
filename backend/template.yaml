@@ -350,7 +350,7 @@ Resources:
       FunctionName: limdocs-generate-questions
       CodeUri: src/
       Handler: generate_questions.lambda_handler
-      Runtime: python3.12
+      Runtime: python3.9
       Timeout: 60
       Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
       Environment:
@@ -366,7 +366,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref LimdocsApi
-            Path: /courses/{courseId}/documents/{documentId}/generate
+            Path: /courses/{courseId}/generate-quiz
             Method: post
 
 Outputs:
