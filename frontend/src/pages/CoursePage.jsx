@@ -3,7 +3,12 @@ import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { fetchAuthSession, getCurrentUser } from 'aws-amplify/auth'
 import './CoursePage.css'
 import { useLanguageControl } from '../language-control/LanguageControlProvider.jsx'
-import { getCourseDocuments, getUploadUrl, uploadFileToS3 } from '../services/documentsService.js'
+import {
+  deleteDocument,
+  getCourseDocuments,
+  getUploadUrl,
+  uploadFileToS3,
+} from '../services/documentsService.js'
 
 function fileKey(file) {
   return `${file.name}-${file.size}-${file.lastModified}`
@@ -44,6 +49,10 @@ export default function CoursePage() {
   const [documents, setDocuments] = useState([])
   const [documentsLoading, setDocumentsLoading] = useState(false)
   const [documentsError, setDocumentsError] = useState(null)
+  const [documentsNotice, setDocumentsNotice] = useState(null)
+  const [deletingDocId, setDeletingDocId] = useState(null)
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+  const [pendingDeleteDoc, setPendingDeleteDoc] = useState(null)
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
   const [selectedFiles, setSelectedFiles] = useState([])
   const [isDraggingOverDropzone, setIsDraggingOverDropzone] = useState(false)
@@ -64,6 +73,7 @@ export default function CoursePage() {
     if (!courseId) return
     setDocumentsLoading(true)
     setDocumentsError(null)
+    setDocumentsNotice(null)
     try {
       const session = await fetchAuthSession()
       const idToken = session.tokens?.idToken?.toString()
@@ -104,6 +114,12 @@ export default function CoursePage() {
     setUploadError(null)
     setUploadSuccess(false)
   }, [])
+
+  const closeDeleteModal = useCallback(() => {
+    if (deletingDocId) return
+    setIsDeleteModalOpen(false)
+    setPendingDeleteDoc(null)
+  }, [deletingDocId])
 
   const addFiles = useCallback((files) => {
     if (!files.length) return
@@ -189,6 +205,15 @@ export default function CoursePage() {
   }, [isUploadModalOpen, isUploading, closeUploadModal])
 
   useEffect(() => {
+    if (!isDeleteModalOpen) return undefined
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape' && !deletingDocId) closeDeleteModal()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isDeleteModalOpen, deletingDocId, closeDeleteModal])
+
+  useEffect(() => {
     if (!uploadSuccess || !isUploadModalOpen) return undefined
     const timer = window.setTimeout(() => {
       closeUploadModal()
@@ -213,6 +238,56 @@ export default function CoursePage() {
   const materialsCount = documents.length
   const showDocList = !documentsLoading && !documentsError && documents.length > 0
   const showDocEmpty = !documentsLoading && !documentsError && documents.length === 0
+
+  const handleDeleteClick = (doc, id) => {
+    if (deletingDocId) return
+    setDocumentsError(null)
+    setDocumentsNotice(null)
+    setPendingDeleteDoc({
+      id: String(id),
+      name: String(doc.original_file_name ?? doc.originalFileName ?? '—'),
+    })
+    setIsDeleteModalOpen(true)
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!pendingDeleteDoc?.id || !courseId || deletingDocId) return
+
+    setDocumentsError(null)
+    setDocumentsNotice(null)
+    setDeletingDocId(pendingDeleteDoc.id)
+    try {
+      const session = await fetchAuthSession()
+      const idToken = session.tokens?.idToken?.toString()
+      if (!idToken) {
+        throw new Error(t.coursePage.uploadMissingSession)
+      }
+
+      const result = await deleteDocument(courseId, pendingDeleteDoc.id, idToken)
+      setDocuments((prev) =>
+        prev.filter((doc, index) => {
+          const itemId = String(doc.document_id ?? doc.documentId ?? `doc-${index}`)
+          return itemId !== pendingDeleteDoc.id
+        }),
+      )
+      setDocumentsNotice(result?.message || t.coursePage.deleteSuccess)
+      setIsDeleteModalOpen(false)
+      setPendingDeleteDoc(null)
+    } catch (err) {
+      let message = t.coursePage.deleteError
+      const apiMsg = err?.response?.data?.message
+      if (typeof apiMsg === 'string' && apiMsg.trim()) {
+        message = apiMsg.trim()
+      } else if (typeof err?.message === 'string' && err.message.includes('VITE_API_URL')) {
+        message = t.coursePage.uploadApiNotConfigured
+      } else if (typeof err?.message === 'string' && err.message.trim()) {
+        message = err.message.trim()
+      }
+      setDocumentsError(message)
+    } finally {
+      setDeletingDocId(null)
+    }
+  }
 
   return (
     <main className="course-page" dir={dir} lang={lang}>
@@ -305,6 +380,12 @@ export default function CoursePage() {
                 </p>
               ) : null}
 
+              {documentsNotice && !documentsLoading ? (
+                <p className="course-page__documents-notice" role="status">
+                  {documentsNotice}
+                </p>
+              ) : null}
+
               {showDocEmpty ? (
                 <p className="course-page__materials-empty">{t.coursePage.documentsListEmpty}</p>
               ) : null}
@@ -323,6 +404,7 @@ export default function CoursePage() {
                       String(status).toUpperCase() === 'UPLOADED'
                         ? t.coursePage.statusUploaded
                         : String(status || '—')
+                    const deletingThisDoc = deletingDocId === String(id)
                     return (
                       <li key={String(id)} className="course-page__doc-card">
                         <div className="course-page__doc-card-main">
@@ -334,6 +416,28 @@ export default function CoursePage() {
                           </span>
                         </div>
                         <span className="course-page__doc-badge">{statusLabel}</span>
+                        <div className="course-page__doc-card-actions">
+                          <button
+                            type="button"
+                            className="course-page__doc-delete-btn"
+                            disabled={Boolean(deletingDocId)}
+                            onClick={() => handleDeleteClick(doc, id)}
+                            aria-label={tx(t.coursePage.deleteDocumentAria, { name })}
+                          >
+                            <span className="course-page__doc-delete-icon" aria-hidden>
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                                <path
+                                  d="M9 3.75h6m-7.5 3h9m-7.5 3.75v7.5m3-7.5v7.5m4.875-10.5-.662 9.272A2.25 2.25 0 0 1 13.97 21h-3.94a2.25 2.25 0 0 1-2.243-2.028L7.125 7.5"
+                                  stroke="currentColor"
+                                  strokeWidth="1.75"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            </span>
+                            {deletingThisDoc ? t.coursePage.deleteDeleting : t.coursePage.deleteLabel}
+                          </button>
+                        </div>
                       </li>
                     )
                   })}
@@ -514,6 +618,47 @@ export default function CoursePage() {
                   {isUploading ? t.coursePage.uploadUploading : t.coursePage.uploadSubmit}
                 </button>
               ) : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {isDeleteModalOpen ? (
+        <div
+          className="course-page__modal-backdrop"
+          role="presentation"
+          onClick={closeDeleteModal}
+        >
+          <section
+            className="course-page__modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="course-delete-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="course-delete-modal-title" className="course-page__modal-title">
+              {t.coursePage.deleteModalTitle}
+            </h2>
+            <p className="course-page__modal-subtitle">
+              {tx(t.coursePage.deleteConfirm, { name: pendingDeleteDoc?.name || '—' })}
+            </p>
+            <div className="course-page__modal-actions">
+              <button
+                type="button"
+                className="course-page__modal-cancel"
+                disabled={Boolean(deletingDocId)}
+                onClick={closeDeleteModal}
+              >
+                {t.home.cancel}
+              </button>
+              <button
+                type="button"
+                className="course-page__modal-submit course-page__modal-submit--danger"
+                disabled={Boolean(deletingDocId)}
+                onClick={handleConfirmDelete}
+              >
+                {deletingDocId ? t.coursePage.deleteDeleting : t.coursePage.deleteConfirmCta}
+              </button>
             </div>
           </section>
         </div>

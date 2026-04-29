@@ -69,3 +69,14 @@ This file lives at `docs/progress.log.md` and is used for project progress track
 - Documented course documents architecture and UI notes in project docs. | files: `docs/course-documents-plan.md` | status: done
 - Polished course page CSS: flatter layout on page surface, sidebar separator and soft active nav, premium document cards and status pill, full-width layout with `clamp` padding (removed fixed `960px` max width on key regions). | files: `frontend/src/pages/CoursePage.css` | status: done
 - Verified production build after course page and documents work. | files: `frontend/` (npm run build) | status: done
+
+## 2026-04-29
+
+- Added backend delete endpoint infrastructure by introducing `DeleteCourseDocumentFunction` in SAM and wiring `DELETE /courses/{courseId}/documents/{documentId}` through `LimdocsApi` with default Cognito authorizer. | files: `backend/template.yaml` | status: done
+- Implemented secure delete Lambda with auth/path validation, DynamoDB lookup, owner/course authorization checks, and strict S3-first-then-Dynamo deletion order inside try/except to prevent orphaned files. | files: `backend/src/delete_document.py` | status: done
+- Added future cleanup reminder in delete Lambda for Textract pipeline outputs so generated processed artifacts can be deleted when that pipeline is added. | files: `backend/src/delete_document.py` | status: done
+- Added frontend documents API client method `deleteDocument(courseId, documentId, idToken)` for authenticated DELETE requests with encoded params. | files: `frontend/src/services/documentsService.js` | status: done
+- Upgraded course documents UI with per-card delete action, in-progress delete state, and optimistic local removal from `documents` via `.filter()` after successful deletion. | files: `frontend/src/pages/CoursePage.jsx` | status: done
+- Replaced browser `window.confirm` with a styled in-app confirmation modal matching existing CoursePage modal patterns and premium visual language. | files: `frontend/src/pages/CoursePage.jsx`, `frontend/src/pages/CoursePage.css` | status: done
+- Added bilingual delete UX copy (confirm prompt/title/CTA, success, error, aria, deleting label) under `coursePage` content keys. | files: `frontend/src/language-control/languageContent.js` | status: done
+- Validated new backend Lambda syntax and ran frontend lint; lint failure was due to pre-existing unrelated issues in other files, while changed delete-flow files passed without newly introduced lint problems. | files: `backend/src/delete_document.py`, `frontend/src/pages/CoursePage.jsx`, `frontend/src/services/documentsService.js`, `frontend/src/language-control/languageContent.js` | status: done

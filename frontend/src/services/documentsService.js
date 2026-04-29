@@ -36,6 +36,38 @@ export async function getCourseDocuments(courseId, idToken) {
 
 /**
  * @param {string} courseId
+ * @param {string} documentId
+ * @param {string} idToken Cognito ID token (JWT)
+ * @returns {Promise<{ message?: string }>}
+ */
+export async function deleteDocument(courseId, documentId, idToken) {
+  if (!apiBaseUrl) {
+    throw new Error('API is not configured. Set VITE_API_URL.')
+  }
+  if (!courseId) {
+    throw new Error('Missing courseId.')
+  }
+  if (!documentId) {
+    throw new Error('Missing documentId.')
+  }
+  if (!idToken) {
+    throw new Error('Missing idToken.')
+  }
+
+  const response = await axios.delete(
+    `${apiBaseUrl}/courses/${encodeURIComponent(courseId)}/documents/${encodeURIComponent(documentId)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+      },
+    },
+  )
+
+  return response?.data ?? {}
+}
+
+/**
+ * @param {string} courseId
  * @param {string} fileName
  * @param {string} fileType MIME type (must match S3 PUT Content-Type)
  * @param {string} idToken Cognito ID token (JWT)

@@ -310,6 +310,17 @@
   border: 1px solid rgba(185, 28, 28, 0.22);
 }
 
+.course-page__documents-notice {
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #166534;
+  background: rgba(22, 101, 52, 0.08);
+  border: 1px solid rgba(22, 101, 52, 0.2);
+}
+
 .course-page__documents-skeleton {
   margin-bottom: 0.5rem;
 }
@@ -408,6 +419,55 @@
   background: #e8f4ff;
   border: none;
   line-height: 1.2;
+}
+
+.course-page__doc-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.course-page__doc-delete-btn {
+  border: 1px solid rgba(185, 28, 28, 0.2);
+  background: transparent;
+  color: #991b1b;
+  border-radius: 999px;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: inherit;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.course-page__doc-delete-btn:hover:not(:disabled) {
+  background: rgba(185, 28, 28, 0.08);
+  border-color: rgba(185, 28, 28, 0.35);
+}
+
+.course-page__doc-delete-btn:focus-visible {
+  outline: 2px solid var(--brand-blue);
+  outline-offset: 2px;
+}
+
+.course-page__doc-delete-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.course-page__doc-delete-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 @media (max-width: 700px) {
@@ -708,6 +768,11 @@
 
 .course-page__modal-submit:hover:not(:disabled) {
   filter: brightness(1.05);
+}
+
+.course-page__modal-submit--danger {
+  background: #b91c1c;
+  box-shadow: 0 6px 20px -4px rgba(185, 28, 28, 0.45);
 }
 
 .course-page__modal-submit:disabled,

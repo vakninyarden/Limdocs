@@ -218,6 +218,26 @@ Resources:
             Path: /courses/{courseId}/documents
             Method: get
 
+  DeleteCourseDocumentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: limdocs-delete-course-document
+      CodeUri: src/
+      Handler: delete_document.lambda_handler
+      Runtime: python3.9
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Environment:
+        Variables:
+          DOCUMENTS_TABLE: !Ref DocumentsTable
+          UPLOAD_BUCKET: !Ref RawUploadsBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref LimdocsApi
+            Path: /courses/{courseId}/documents/{documentId}
+            Method: delete
+
 Outputs:
   UserPoolId:
     Description: Cognito User Pool ID
