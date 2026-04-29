@@ -119,6 +119,48 @@ Resources:
           Projection:
             ProjectionType: ALL
 
+  QuestionSetsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: question_sets
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: set_id
+          AttributeType: S
+        - AttributeName: document_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: set_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: DocumentIdIndex
+          KeySchema:
+            - AttributeName: document_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  QuestionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: questions
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: question_id
+          AttributeType: S
+        - AttributeName: set_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: question_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: SetIdIndex
+          KeySchema:
+            - AttributeName: set_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
   LimdocsApi:
     Type: AWS::Serverless::Api
     Properties:
@@ -302,6 +344,31 @@ Resources:
             Path: /courses/{courseId}
             Method: delete
 
+  GenerateQuestionsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: limdocs-generate-questions
+      CodeUri: src/
+      Handler: generate_questions.lambda_handler
+      Runtime: python3.12
+      Timeout: 60
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Environment:
+        Variables:
+          QUESTIONS_TABLE: !Ref QuestionsTable
+          QUESTION_SETS_TABLE: !Ref QuestionSetsTable
+          DOCUMENTS_TABLE: !Ref DocumentsTable
+          PROCESSED_BUCKET: !Ref ProcessedOutputsBucket
+          OPENAI_API_KEY: "PLACEHOLDER_FOR_SECRET"
+          OPENAI_MODEL_NAME: "PLACEHOLDER_MODEL_NAME"
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref LimdocsApi
+            Path: /courses/{courseId}/documents/{documentId}/generate
+            Method: post
+
 Outputs:
   UserPoolId:
     Description: Cognito User Pool ID
@@ -346,3 +413,11 @@ Outputs:
   DocumentsTableName:
     Description: DynamoDB table name for document metadata
     Value: !Ref DocumentsTable
+
+  QuestionSetsTableName:
+    Description: DynamoDB table name for generated question sets
+    Value: !Ref QuestionSetsTable
+
+  QuestionsTableName:
+    Description: DynamoDB table name for generated questions
+    Value: !Ref QuestionsTable
