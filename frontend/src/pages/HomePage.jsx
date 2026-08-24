@@ -7,6 +7,7 @@ import {
   signOut,
 } from 'aws-amplify/auth'
 import './HomePage.css'
+import limdocsLogo from '../assets/logo_limdocs_final.png'
 import { useLanguageControl } from '../language-control/LanguageControlProvider.jsx'
 import { deleteCourse, getCourseProgress, getUserCourses } from '../services/coursesService.js'
 import { getCourseDocuments } from '../services/documentsService.js'
@@ -596,8 +597,11 @@ export default function HomePage() {
     <main className="home-page" dir={dir} lang={lang}>
       <aside className="home-page__sidebar" aria-label={t.home.navLabel}>
         <div className="home-page__brand">
-          <div className="home-page__logo" aria-hidden />
-          <p className="home-page__brand-name">{t.home.brandName}</p>
+          <img
+            className="home-page__logo"
+            src={limdocsLogo}
+            alt={t.home.brandName}
+          />
         </div>
 
         <nav className="home-page__menu" aria-label={t.home.navLabel}>

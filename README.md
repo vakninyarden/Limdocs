@@ -15,18 +15,19 @@ Limdocs is an adaptive learning platform for students: create course spaces, upl
 
 ## What you can do today
 
-- **Sign up and sign in** with AWS Cognito (email/username), including account confirmation
+- **Sign up and sign in** with AWS Cognito (email/username), including account confirmation; sync profile via `POST /users` after signup
 - **Switch Hebrew ↔ English** with persisted preference and full RTL/LTR layout
-- **Create and manage courses** (private or public visibility) from the dashboard
-- **Upload materials** via S3 pre-signed URLs (PDF, PNG, JPEG)
-- **Process documents** asynchronously with Textract, then extract bilingual sub-topics with OpenAI
-- **Generate question sets** from one or more ready documents (async worker, status polling in the UI)
-- **Take quizzes**, submit attempts, and review correct answers with explanations
-- **Browse attempt history** and reopen past submissions in read-only review mode
-- **View weakness analytics** per topic and difficulty on the course **Analyzed Weaknesses** tab (fed by quiz submissions)
-- **Delete** documents, attempts, question sets, or entire courses (cascading S3 + DynamoDB cleanup)
+- **Create and manage courses** from the dashboard (private or public visibility stored on the course; **access is owner-only** today—public browse/clone is not wired up yet)
+- **Upload materials** via S3 pre-signed URLs (PDF, PNG, JPEG; **20 MB** max per file via `file_size_bytes`)
+- **Process documents** asynchronously: S3 `uploads/` trigger → Textract → bilingual sub-topic extraction (OpenAI) → `READY` with topic chips on the Materials tab
+- **Generate question sets** from one or more `READY` documents: async API + worker Lambdas, UI polling until documents leave `GENERATING`, optional **5/10/15/20** questions, **Hebrew or English** quiz language, and **weakness-focused** mode that prioritizes your weakest topics from `user_progress`
+- **Take quizzes**, submit attempts (graded server-side), and review correct answers with explanations
+- **Browse attempt history**, reopen past submissions in read-only review mode, and **delete** individual attempts (progress matrix deltas are reversed)
+- **View weakness analytics** on the course **Analyzed Weaknesses** tab: weighted topic scores (Easy/Medium/Hard), weak/medium/strong status bands, vertical score chart, and per-topic breakdown—fed by quiz submissions and served from `GET /courses/{courseId}/progress`
+- **Home dashboard** shows live per-course stats (document count, relative last activity, progress bar from averaged topic mastery) while stub nav items (global search, Documents / Analytics) remain presentational
+- **Delete** documents, attempts, question sets, or entire courses (cascading S3 + DynamoDB cleanup, including `user_progress` on course delete)
 
-Some dashboard chrome (global search, Documents / Analytics nav items) is presentational only and does not yet route to separate pages.
+**Course page tabs:** Materials, Question Sets, Attempts, Analyzed Weaknesses (deep-link with `?tab=questionSets` or `?tab=weaknesses`).
 
 ---
 
@@ -36,15 +37,18 @@ Serverless, event-driven design on AWS:
 
 ```
 Browser (React SPA)
-    → AWS Amplify Hosting (connected to GitHub for frontend CI/CD deploys)
+    → AWS Amplify Hosting (GitHub-connected CI/CD)
     → Cognito (auth) + API Gateway (REST, Cognito authorizer)
         → Lambda handlers (courses, uploads, quizzes, attempts, progress)
-    → S3 raw uploads (pre-signed PUT) → S3 event → process_document Lambda
-        → Textract (async) → processed text in S3 → DynamoDB document status
-        → OpenAI topic extraction → status READY
-    → generate-quiz API → async worker Lambda → question_sets + questions tables
-    → submit attempt → grades answers → attempts + attempt_answers + user_progress matrix
+    → S3 raw uploads (pre-signed PUT under uploads/) → S3 event → process_document Lambda
+        → Textract (async) → processed text in S3 → OpenAI topic extraction → DynamoDB READY
+    → POST /generate-quiz → generate_questions api_handler (202)
+        → async invoke → generate_questions worker_handler → question_sets + questions tables
+    → submit attempt → grades answers → attempts + attempt_answers + user_progress matrix (topic × difficulty)
+    → delete attempt → subtract matrix_deltas (rebuild fallback on drift)
 ```
+
+Owner-only authorization for course-scoped APIs is enforced in Lambda via `course_access.require_course_owner` (Cognito `sub` vs `owner_id`).
 
 ### AWS resources (SAM stack)
 
@@ -53,11 +57,13 @@ Browser (React SPA)
 | **Cognito User Pool** | Authentication for the SPA |
 | **AWS Amplify Hosting** | Frontend hosting and CI/CD deployment from GitHub |
 | **API Gateway** | REST API (`/prod` stage), default Cognito authorizer |
-| **Lambda** | Business logic, Textract orchestration, quiz worker |
+| **Lambda** | 15 functions: HTTP handlers, `process_document` (S3), `generate_questions` API + worker (async, no retries) |
 | **DynamoDB** | `users`, `courses`, `documents`, `question_sets`, `questions`, `attempts`, `attempt_answers`, `user_progress` |
-| **S3** | Raw uploads (`uploads/` prefix) and processed text outputs |
+| **S3** | Raw uploads (`limdocs-raw-uploads-{account}`) and processed text (`limdocs-processed-outputs-{account}`) |
 | **Textract** | OCR for uploaded PDFs/images |
-| **OpenAI** | Sub-topic extraction after OCR; quiz question generation |
+| **OpenAI** | Sub-topic extraction after OCR; quiz question generation (structured JSON schema + topic allowlist) |
+
+`process_document` and the quiz worker use **reserved concurrency of 2** (Learner Lab cost guardrail).
 
 ### Document processing lifecycle
 
@@ -66,16 +72,25 @@ Typical `processing_status` values on a document:
 | Status | Meaning |
 |--------|---------|
 | `UPLOADED` | Metadata recorded; file in S3 |
-| `PROCESSING` | Textract job in progress |
-| `READY` | Text extracted, topics available, eligible for quiz generation |
-| `GENERATING` | Quiz worker running for this document |
+| `PROCESSING` | Textract job in progress (idempotent claim from `UPLOADED`) |
+| `READY` | Text extracted, bilingual `topics` available, eligible for quiz generation |
+| `GENERATING` | Quiz worker holds a conditional claim while generating for this document |
 | `FAILED` / `ERROR` | Processing or generation failed (`failure_reason` when set) |
 
-The course page polls materials while any document is not in a terminal state (`READY`, `FAILED`, `ERROR`).
+The course page polls materials while any document is not in a terminal state (`READY`, `FAILED`, `ERROR`). Quiz generation can target documents in `READY` or `FAILED` (retry after failure).
+
+### Quiz generation modes
+
+| `generation_mode` | When |
+|-------------------|------|
+| `NORMAL` | Default practice set from selected documents |
+| `WEAKNESS_FOCUSED` | `focus_weak_topics: true` and progress data exist—worker prioritizes up to five weakest canonical topics |
+
+Question sets also store `quiz_language`, `requested_question_count`, and (when applicable) `focused_topics` metadata.
 
 ### Deletion semantics
 
-Deletes follow **S3 first, then DynamoDB** for documents. Deleting a course cascades through documents (raw + processed buckets), question sets, questions, attempts, and attempt answers before removing the course row.
+Deletes follow **S3 first, then DynamoDB** for documents. Deleting an attempt removes answer rows, subtracts stored `matrix_deltas` from `user_progress` (with rebuild fallback), then deletes the attempt. Deleting a course cascades through documents (raw + processed buckets), question sets, questions, attempts, attempt answers, and the owner's `user_progress` row before removing the course.
 
 ---
 
@@ -83,14 +98,17 @@ Deletes follow **S3 first, then DynamoDB** for documents. Deleting a course casc
 
 ```
 Limdocs/
-├── frontend/          # React + Vite SPA
+├── frontend/              # React + Vite SPA (pages, services, components, i18n)
 ├── backend/
-│   ├── template.yaml  # SAM / CloudFormation
-│   └── src/           # Lambda handlers
+│   ├── template.yaml      # SAM / CloudFormation
+│   ├── src/               # Lambda handlers + shared modules (course_access, openai_helpers, topic_scoring, progress_matrix)
+│   └── tests/             # Python unit tests (topic scoring, progress matrix, quiz generation)
 ├── docs/
-│   ├── design.md      # Product & architecture design (text)
+│   ├── design.md          # Product & architecture design (text; may be gitignored locally)
+│   ├── lambda-functions-flow.md
+│   ├── course-documents-plan.md
 │   └── progress.log.md
-└── package.json       # npm workspaces (runs frontend scripts from root)
+└── package.json           # npm workspaces (runs frontend scripts from root)
 ```
 
 ---
@@ -129,9 +147,9 @@ VITE_COGNITO_USER_POOL_CLIENT_ID=<UserPoolClientId>
 VITE_API_URL=https://<api-id>.execute-api.<region>.amazonaws.com/prod
 ```
 
-The app uses the Cognito **ID token** as `Authorization: Bearer` for API Gateway.
+The app also accepts `VITE_API_BASE_URL` as an alias for `VITE_API_URL`. It uses the Cognito **ID token** as `Authorization: Bearer` for API Gateway.
 
-**Routes:** `/login`, `/register`, `/home`, `/course/:courseId`
+**Routes:** `/login`, `/register`, `/home`, `/course/:courseId` (optional `?tab=` for inner tabs)
 
 ### Backend (SAM)
 
@@ -150,6 +168,13 @@ The stack is configured for **AWS Learner Lab** style accounts (`LabRole` IAM ro
 
 **Key outputs:** `ApiUrl`, `UserPoolClientId`, bucket names, table names (see `Outputs` in `template.yaml`).
 
+**Backend unit tests** (from repo root, with deps installed for `backend/src`):
+
+```bash
+cd backend
+python -m pytest tests/
+```
+
 ### Main API surface
 
 All routes require Cognito auth unless noted. Owner checks apply on course-scoped operations.
@@ -157,23 +182,23 @@ All routes require Cognito auth unless noted. Owner checks apply on course-scope
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/users` | Sync user profile after signup |
-| `POST` | `/courses` | Create course |
-| `GET` | `/users/{userId}/courses` | List caller's courses |
+| `POST` | `/courses` | Create course (`course_name`, `description`, `is_public`) |
+| `GET` | `/users/{userId}/courses` | List caller's courses (`userId` must match token `sub`) |
 | `DELETE` | `/courses/{courseId}` | Delete course and all related data |
-| `POST` | `/courses/{courseId}/upload-url` | Pre-signed upload + document row |
-| `GET` | `/courses/{courseId}/materials` | List course documents |
+| `POST` | `/courses/{courseId}/upload-url` | Pre-signed upload + document row (`file_name`, `file_type`, `file_size_bytes`) |
+| `GET` | `/courses/{courseId}/materials` | List course documents (includes `topics` when present) |
 | `DELETE` | `/courses/{courseId}/documents/{documentId}` | Delete document |
-| `POST` | `/courses/{courseId}/generate-quiz` | Start async question generation (`202`) |
+| `POST` | `/courses/{courseId}/generate-quiz` | Start async question generation (`202`). Body: `document_ids` (required), optional `requested_question_count` (5/10/15/20), `quiz_language` (`he`/`en`, both required if either sent), `focus_weak_topics` (boolean) |
 | `GET` | `/courses/{courseId}/question-sets` | List question sets |
-| `GET` | `/courses/{courseId}/question-sets/{setId}` | Question set detail |
+| `GET` | `/courses/{courseId}/question-sets/{setId}` | Question set detail + questions |
 | `DELETE` | `/courses/{courseId}/question-sets/{setId}` | Delete question set |
-| `POST` | `/courses/{courseId}/question-sets/{setId}/attempts` | Submit quiz attempt |
+| `POST` | `/courses/{courseId}/question-sets/{setId}/attempts` | Submit quiz attempt (`answers`, `time_spent_seconds`) |
 | `GET` | `/courses/{courseId}/attempts` | List attempts |
 | `GET` | `/courses/{courseId}/attempts/{attemptId}/answers` | Attempt review payload |
-| `DELETE` | `/courses/{courseId}/attempts/{attemptId}` | Delete attempt |
-| `GET` | `/courses/{courseId}/progress` | Topic/difficulty mastery matrix |
+| `DELETE` | `/courses/{courseId}/attempts/{attemptId}` | Delete attempt and adjust progress |
+| `GET` | `/courses/{courseId}/progress` | `{ course_id, matrix, topics }` — `topics` includes weighted scores and status bands |
 
-S3 uploads trigger `process_document` automatically (no HTTP route).
+S3 uploads trigger `process_document` automatically (no HTTP route). The quiz **worker** is invoked asynchronously by the generate-quiz API handler (not exposed on API Gateway).
 
 ---
 
@@ -191,13 +216,15 @@ S3 uploads trigger `process_document` automatically (no HTTP route).
 | **API** | Amazon API Gateway (REST) |
 | **Storage** | DynamoDB, S3 |
 | **OCR** | Amazon Textract (async document text detection) |
-| **LLM** | OpenAI API via official Python SDK |
+| **LLM** | OpenAI API via official Python SDK (`gpt-4.1-mini`) |
 
 ---
 
 ## Documentation
 
 - [Design document](docs/design.md) — product goals, AWS module mapping, data model notes
+- [Lambda functions flow](docs/lambda-functions-flow.md) — trigger map and Mermaid diagram
+- [Course documents plan](docs/course-documents-plan.md) — materials UI and API notes
 - [Progress log](docs/progress.log.md) — chronological engineering milestones
 
 ---

@@ -1,4 +1,4 @@
----
+מפ---
 description: Limdocs React/Vite frontend stack, i18n, API, implementation style, and commit conventions
 globs: frontend/**/*.{js,jsx,css}
 alwaysApply: false
