@@ -175,3 +175,23 @@ This file lives at `docs/progress.log.md` and is used for project progress track
 - Added Course page "focus on my weak topics" checkbox (quiz modal + persisted preference) and `focus_weak_topics` client payload; extended topic-scoring and generate-questions unit tests for weak-focus parsing/resolver/prompt behavior. | files: `frontend/src/pages/CoursePage.jsx`, `frontend/src/pages/CoursePage.css`, `frontend/src/services/documentsService.js`, `backend/tests/test_generate_questions.py`, `backend/tests/test_topic_scoring.py` | status: done
 - Wired Home dashboard course cards to live stats: per-course parallel fetch of documents + progress, `courseCardStats` helper for document count, last-updated ISO (course or latest doc), and progress bar percent from averaged topic mastery scores. | files: `frontend/src/pages/HomePage.jsx`, `frontend/src/utils/courseCardStats.js`, `frontend/src/services/coursesService.js` | status: done
 - Added Home loading/pending UX for course meta and progress bar (`courseMetaDocsLoading`, pending meta styling, `aria-busy`) while stats requests are in flight. | files: `frontend/src/pages/HomePage.jsx`, `frontend/src/pages/HomePage.css`, `frontend/src/language-control/languageContent.js` | status: done
+
+## 2026-08-16
+
+- Replaced the Home sidebar Limdocs headline/circle mark with the final logo image (`logo_limdocs_final.png`) and sized it to the brand slot. | files: `frontend/src/assets/logo_limdocs_final.png`, `frontend/src/pages/HomePage.jsx`, `frontend/src/pages/HomePage.css` | status: done
+
+## 2026-08-24
+
+- Rewrote README to match the live system: Cognito auth, Textract + OpenAI pipeline, quiz generation (count/language/weak-focus), attempts, weakness analytics, owner-only course APIs, and AWS resource table. | files: `README.md` | status: done
+- Removed outdated course-documents plan doc after it no longer matched the implemented pipeline. | files: `docs/course-documents-plan.md` | status: done
+
+## 2026-08-30
+
+- Replaced the purple-lightning SVG favicon with the Limdocs symbol PNG and set the browser tab title to `Limdocs`. | files: `frontend/index.html`, `frontend/public/favicon.png` | status: done
+- Added the Limdocs symbol image on login and register headers so auth screens match dashboard branding. | files: `frontend/src/pages/LoginPage.jsx`, `frontend/src/pages/LoginPage.css`, `frontend/src/assets/limdocs-symbol.png` | status: done
+- Added `visibility_courses_index` GSI on `courses` (`visibility` HASH + `created_at` RANGE, INCLUDE `course_name`/`owner_id`/`updated_at`) and `GET /courses/public` Lambda with paginated public-course query, sequential per-course document aggregation, server-derived `is_owner`, and whitelist sanitization. | files: `backend/template.yaml`, `backend/src/get_public_courses.py`, `backend/tests/test_get_public_courses.py`, `backend/tests/test_get_courses.py` | status: done
+- Split Home dashboard into **My Courses** / **Explore Courses** tabs: Explore refetches on every tab switch, owned public courses reuse full owner cards via `OwnerCourseCard`, foreign public courses render as static metadata-only cards; added `getPublicCourses` client, tab CSS, and bilingual i18n. | files: `frontend/src/pages/HomePage.jsx`, `frontend/src/pages/HomePage.css`, `frontend/src/services/coursesService.js`, `frontend/src/language-control/languageContent.js` | status: done
+- Added accessible courses tablist keyboard navigation (RTL-aware arrows, Home/End) and kept Explore in sync when an owned public course is deleted from My Courses. | files: `frontend/src/pages/HomePage.jsx` | status: done
+- Documented `GET /courses/public` in README (API table, 17 Lambdas, reserved `/courses/public` path) and added `get_public_courses` to the Lambda flow diagram. | files: `README.md`, `docs/lambda-functions-flow.md` | status: done
+- Added backend unit tests for public-course auth/sanitization/pagination plus `get_courses` owner-scope regression; local `pytest tests/` 59 passed and frontend production build succeeded. | files: `backend/tests/test_get_public_courses.py`, `backend/tests/test_get_courses.py` | status: done
+- Pre-deployment read-only inspection for courses missing `visibility` or `created_at`: not run in this session (requires live AWS credentials against the `courses` table before stage-1 deploy). | files: `docs/progress.log.md` | status: pending

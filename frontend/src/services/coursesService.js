@@ -29,6 +29,24 @@ export async function getUserCourses(userId, idToken) {
   return []
 }
 
+export async function getPublicCourses(idToken) {
+  if (!apiBaseUrl) {
+    throw new Error('API is not configured. Set VITE_API_URL.')
+  }
+  if (!idToken) {
+    throw new Error('Missing idToken.')
+  }
+
+  const response = await axios.get(`${apiBaseUrl}/courses/public`, {
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+    },
+  })
+
+  const payload = response?.data
+  return Array.isArray(payload?.courses) ? payload.courses : []
+}
+
 export async function deleteCourse(courseId, idToken) {
   if (!apiBaseUrl) {
     throw new Error('API is not configured. Set VITE_API_URL.')

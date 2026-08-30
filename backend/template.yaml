@@ -61,6 +61,10 @@ Resources:
           AttributeType: S
         - AttributeName: owner_id
           AttributeType: S
+        - AttributeName: visibility
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
       KeySchema:
         - AttributeName: course_id
           KeyType: HASH
@@ -71,6 +75,18 @@ Resources:
               KeyType: HASH
           Projection:
             ProjectionType: ALL
+        - IndexName: visibility_courses_index
+          KeySchema:
+            - AttributeName: visibility
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - course_name
+              - owner_id
+              - updated_at
 
   # S3 -> Lambda wiring is explicit (permission + bucket notification) instead of SAM Function
   # Events:S3 on the same bucket. SAM's implicit S3 event creates Lambda->Bucket and Bucket->Lambda
@@ -330,6 +346,32 @@ Resources:
           Properties:
             RestApiId: !Ref LimdocsApi
             Path: /users/{userId}/courses
+            Method: get
+
+  GetPublicCoursesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: limdocs-get-public-courses
+      CodeUri: src/
+      Handler: get_public_courses.lambda_handler
+      Runtime: python3.9
+      Timeout: 30
+      # LabRole must include dynamodb:Query on courses/visibility_courses_index
+      # and documents/CourseIdIndex.
+      # Function timeout is bounded in practice by API Gateway's 29-second integration limit.
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Environment:
+        Variables:
+          COURSES_TABLE: !Ref LimdocsCoursesTable
+          DOCUMENTS_TABLE: !Ref DocumentsTable
+          VISIBILITY_INDEX_NAME: visibility_courses_index
+          DOCUMENTS_COURSE_INDEX: CourseIdIndex
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref LimdocsApi
+            Path: /courses/public
             Method: get
 
   GenerateUploadUrlFunction:

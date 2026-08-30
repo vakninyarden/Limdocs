@@ -385,6 +385,63 @@
   max-width: 52ch;
 }
 
+.home-page__courses-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.home-page__courses-tab {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 0.45rem 0.95rem;
+  font-family: inherit;
+  font-size: clamp(1rem, 2vw, 1.15rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  cursor: pointer;
+  transition:
+    background-color 0.2s var(--ease-standard),
+    color 0.2s var(--ease-standard);
+}
+
+.home-page__courses-tab:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.home-page__courses-tab--active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.home-page__courses-tab:focus-visible {
+  outline: 2px solid var(--brand-blue);
+  outline-offset: 2px;
+}
+
+.home-page__courses-panel[hidden] {
+  display: none;
+}
+
+.home-page__course-card--static {
+  cursor: default;
+  padding-inline-end: 1.05rem;
+  transition: none;
+}
+
+.home-page__course-card--static:hover {
+  transform: none;
+  border-color: rgba(226, 232, 240, 0.88);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 8px 30px -10px rgba(15, 23, 42, 0.06),
+    0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
 .home-page__filter-btn {
   display: inline-flex;
   align-items: center;

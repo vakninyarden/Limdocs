@@ -9,7 +9,7 @@ import {
 import './HomePage.css'
 import limdocsLogo from '../assets/logo_limdocs_final.png'
 import { useLanguageControl } from '../language-control/LanguageControlProvider.jsx'
-import { deleteCourse, getCourseProgress, getUserCourses } from '../services/coursesService.js'
+import { deleteCourse, getCourseProgress, getPublicCourses, getUserCourses } from '../services/coursesService.js'
 import { getCourseDocuments } from '../services/documentsService.js'
 import { buildCourseCardStats } from '../utils/courseCardStats.js'
 
@@ -266,6 +266,79 @@ function pickDisplayInitials(name) {
   return s.slice(0, 2).toUpperCase()
 }
 
+function OwnerCourseCard({
+  courseName,
+  docsLabel,
+  activityLabel,
+  progressPct,
+  statsPending,
+  metaLoadingAria,
+  progressLabel,
+  deleteAria,
+  isDeleteDisabled,
+  onOpen,
+  onDelete,
+}) {
+  return (
+    <div className="home-page__course-card-shell">
+      <button type="button" className="home-page__course-card" onClick={onOpen}>
+        <div className="home-page__course-card-body">
+          <span className="home-page__course-name">{courseName}</span>
+          <div
+            className="home-page__course-meta"
+            aria-label={statsPending ? metaLoadingAria : undefined}
+          >
+            <span
+              className={`home-page__course-meta-item${statsPending ? ' home-page__course-meta-item--pending' : ''}`}
+            >
+              <IconMetaDoc />
+              <span>{docsLabel}</span>
+            </span>
+            <span
+              className={`home-page__course-meta-item${statsPending ? ' home-page__course-meta-item--pending' : ''}`}
+            >
+              <IconMetaClock />
+              <span>{activityLabel}</span>
+            </span>
+          </div>
+          <div
+            className="home-page__course-progress-block"
+            aria-busy={statsPending ? 'true' : undefined}
+          >
+            <div className="home-page__course-progress-labels">
+              <span>{progressLabel}</span>
+              <span>{progressPct}%</span>
+            </div>
+            <div
+              className="home-page__course-progress-track"
+              role="progressbar"
+              aria-valuenow={progressPct}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label={progressLabel}
+            >
+              <span
+                className="home-page__course-progress-fill"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+          </div>
+        </div>
+        <IconChevronEnd />
+      </button>
+      <button
+        type="button"
+        className="home-page__course-delete-btn"
+        onClick={onDelete}
+        disabled={isDeleteDisabled}
+        aria-label={deleteAria}
+      >
+        <IconTrash />
+      </button>
+    </div>
+  )
+}
+
 export default function HomePage() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -286,7 +359,13 @@ export default function HomePage() {
   const [courseToDelete, setCourseToDelete] = useState(null)
   const [courseStatsById, setCourseStatsById] = useState({})
   const [courseStatsLoading, setCourseStatsLoading] = useState(false)
+  const [activeCoursesTab, setActiveCoursesTab] = useState('mine')
+  const [publicCourses, setPublicCourses] = useState([])
+  const [isPublicCoursesLoading, setIsPublicCoursesLoading] = useState(false)
+  const [publicCoursesError, setPublicCoursesError] = useState('')
   const statsFetchGenerationRef = useRef(0)
+  const publicFetchGenerationRef = useRef(0)
+  const tabRefs = useRef({ mine: null, explore: null })
   const apiBaseUrl = import.meta.env.VITE_API_URL ?? ''
   const [courseDraft, setCourseDraft] = useState({
     name: '',
@@ -358,6 +437,45 @@ export default function HomePage() {
       cancelled = true
     }
   }, [currentUserId, status, coursesRefreshKey])
+
+  useEffect(() => {
+    let cancelled = false
+    const generation = ++publicFetchGenerationRef.current
+
+    ;(async () => {
+      if (status !== 'authed' || !currentUserId || activeCoursesTab !== 'explore') return
+
+      try {
+        setIsPublicCoursesLoading(true)
+        setPublicCoursesError('')
+
+        const session = await fetchAuthSession()
+        const idToken = session.tokens?.idToken?.toString()
+        if (!idToken) {
+          throw new Error('Missing authentication token.')
+        }
+
+        const items = await getPublicCourses(idToken)
+        if (!cancelled && generation === publicFetchGenerationRef.current) {
+          setPublicCourses(Array.isArray(items) ? items : [])
+        }
+      } catch (error) {
+        console.error('[get-public-courses-failed]', error)
+        if (!cancelled && generation === publicFetchGenerationRef.current) {
+          setPublicCourses([])
+          setPublicCoursesError(error?.message || t.home.exploreCoursesError)
+        }
+      } finally {
+        if (!cancelled && generation === publicFetchGenerationRef.current) {
+          setIsPublicCoursesLoading(false)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [status, currentUserId, activeCoursesTab, t.home.exploreCoursesError])
 
   // Per-course materials + progress (2×N GETs). Future: summary endpoint on list API.
   useEffect(() => {
@@ -517,6 +635,7 @@ export default function HomePage() {
         delete next[deletedId]
         return next
       })
+      setPublicCourses((prev) => prev.filter((c) => normalizeCourseId(c) !== deletedId))
       setIsDeleteCourseOpen(false)
       setCourseToDelete(null)
       setDeleteCourseError('')
@@ -577,6 +696,78 @@ export default function HomePage() {
     } finally {
       setIsCreatingCourse(false)
     }
+  }
+
+  const handleCoursesTabKeyDown = (event) => {
+    const tabOrder = ['mine', 'explore']
+    const currentIndex = tabOrder.indexOf(activeCoursesTab)
+    if (currentIndex < 0) return
+
+    if (event.key === 'Home') {
+      event.preventDefault()
+      const nextId = tabOrder[0]
+      setActiveCoursesTab(nextId)
+      tabRefs.current[nextId]?.focus()
+      return
+    }
+    if (event.key === 'End') {
+      event.preventDefault()
+      const nextId = tabOrder[tabOrder.length - 1]
+      setActiveCoursesTab(nextId)
+      tabRefs.current[nextId]?.focus()
+      return
+    }
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+
+    event.preventDefault()
+    const delta =
+      event.key === 'ArrowRight' ? (dir === 'rtl' ? -1 : 1) : dir === 'rtl' ? 1 : -1
+    const nextIndex = (currentIndex + delta + tabOrder.length) % tabOrder.length
+    const nextId = tabOrder[nextIndex]
+    setActiveCoursesTab(nextId)
+    tabRefs.current[nextId]?.focus()
+  }
+
+  const renderOwnerCourseCard = (course) => {
+    const courseId = normalizeCourseId(course)
+    const courseName = course.course_name ?? course.name ?? t.home.untitledCourse
+    const stats = courseId ? courseStatsById[courseId] : null
+    const statsPending = courseStatsLoading && !stats
+    const docCount = stats?.documentCount ?? course.document_count ?? 0
+    const progressPct = stats?.progressPercent ?? 0
+    const lastUpdatedIso =
+      stats?.lastUpdatedIso ??
+      course.last_updated_at ??
+      (typeof (course.created_at ?? course.createdAt) === 'string'
+        ? course.created_at ?? course.createdAt
+        : null)
+    const activityPhrase = formatRelativeActivity(lastUpdatedIso, lang)
+    const activityTime = activityPhrase ?? t.home.courseMetaUnknown
+    const activityLabel = tx(t.home.courseMetaActivity, { time: activityTime })
+    const docsLabel = statsPending
+      ? t.home.courseMetaDocsLoading
+      : tx(t.home.courseMetaDocs, { count: docCount })
+
+    return (
+      <OwnerCourseCard
+        courseName={courseName}
+        docsLabel={docsLabel}
+        activityLabel={activityLabel}
+        progressPct={progressPct}
+        statsPending={statsPending}
+        metaLoadingAria={t.home.courseCardMetaLoadingAria}
+        progressLabel={t.home.progressLabel}
+        deleteAria={tx(t.home.deleteCourseAria, { name: courseName })}
+        isDeleteDisabled={isDeletingCourse}
+        onOpen={() => {
+          if (!courseId) return
+          navigate(`/course/${encodeURIComponent(String(courseId))}`, {
+            state: { courseName },
+          })
+        }}
+        onDelete={(e) => handleDeleteCourseClick(e, course)}
+      />
+    )
   }
 
   if (status === 'loading') {
@@ -686,138 +877,183 @@ export default function HomePage() {
         <section className="home-page__courses-section" aria-live="polite">
           <header className="home-page__courses-header">
             <div className="home-page__courses-header-text">
-              <h2 className="home-page__courses-title">{t.home.myCourses}</h2>
-              <p className="home-page__courses-subtitle">{t.home.myCoursesSubtitle}</p>
+              <div
+                className="home-page__courses-tabs"
+                role="tablist"
+                aria-label={t.home.coursesTabsAria}
+                onKeyDown={handleCoursesTabKeyDown}
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  id="home-tab-mine"
+                  className={`home-page__courses-tab${activeCoursesTab === 'mine' ? ' home-page__courses-tab--active' : ''}`}
+                  aria-selected={activeCoursesTab === 'mine'}
+                  aria-controls="home-panel-mine"
+                  tabIndex={activeCoursesTab === 'mine' ? 0 : -1}
+                  ref={(el) => {
+                    tabRefs.current.mine = el
+                  }}
+                  onClick={() => setActiveCoursesTab('mine')}
+                >
+                  {t.home.tabMyCourses}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  id="home-tab-explore"
+                  className={`home-page__courses-tab${activeCoursesTab === 'explore' ? ' home-page__courses-tab--active' : ''}`}
+                  aria-selected={activeCoursesTab === 'explore'}
+                  aria-controls="home-panel-explore"
+                  tabIndex={activeCoursesTab === 'explore' ? 0 : -1}
+                  ref={(el) => {
+                    tabRefs.current.explore = el
+                  }}
+                  onClick={() => setActiveCoursesTab('explore')}
+                >
+                  {t.home.tabExploreCourses}
+                </button>
+              </div>
+              <p className="home-page__courses-subtitle">
+                {activeCoursesTab === 'mine'
+                  ? t.home.myCoursesSubtitle
+                  : t.home.exploreCoursesSubtitle}
+              </p>
             </div>
-            <button type="button" className="home-page__filter-btn">
-              <IconFilter />
-              <span>{t.home.filterCourses}</span>
-            </button>
+            {activeCoursesTab === 'mine' ? (
+              <button type="button" className="home-page__filter-btn">
+                <IconFilter />
+                <span>{t.home.filterCourses}</span>
+              </button>
+            ) : null}
           </header>
 
-          {isCoursesLoading ? (
-            <p className="home-page__courses-state">{t.home.coursesLoading}</p>
-          ) : null}
+          <div
+            role="tabpanel"
+            id="home-panel-mine"
+            aria-labelledby="home-tab-mine"
+            className="home-page__courses-panel"
+            hidden={activeCoursesTab !== 'mine'}
+          >
+            {isCoursesLoading ? (
+              <p className="home-page__courses-state">{t.home.coursesLoading}</p>
+            ) : null}
 
-          {!isCoursesLoading && coursesError ? (
-            <p className="home-page__courses-error" role="alert">
-              {t.home.coursesError}
-            </p>
-          ) : null}
+            {!isCoursesLoading && coursesError ? (
+              <p className="home-page__courses-error" role="alert">
+                {t.home.coursesError}
+              </p>
+            ) : null}
 
-          {!isCoursesLoading && !coursesError ? (
-            <ul className="home-page__courses-grid">
-              {courses.length === 0 ? (
-                <li className="home-page__courses-grid-item home-page__courses-grid-item--empty">
-                  <p className="home-page__courses-state">{t.home.coursesEmpty}</p>
+            {!isCoursesLoading && !coursesError ? (
+              <ul className="home-page__courses-grid">
+                {courses.length === 0 ? (
+                  <li className="home-page__courses-grid-item home-page__courses-grid-item--empty">
+                    <p className="home-page__courses-state">{t.home.coursesEmpty}</p>
+                  </li>
+                ) : null}
+                {courses.map((course) => {
+                  const courseId = normalizeCourseId(course)
+                  const courseName =
+                    course.course_name ?? course.name ?? t.home.untitledCourse
+                  return (
+                    <li key={String(courseId || courseName)} className="home-page__courses-grid-item">
+                      {renderOwnerCourseCard(course)}
+                    </li>
+                  )
+                })}
+                <li className="home-page__courses-grid-item">
+                  <button
+                    type="button"
+                    className="home-page__course-card home-page__course-card--create"
+                    onClick={() => setIsCreateCourseOpen(true)}
+                  >
+                    <span className="home-page__create-fab" aria-hidden>
+                      <IconPlus />
+                    </span>
+                    <span className="home-page__course-name home-page__course-name--create">
+                      {t.home.createCourse}
+                    </span>
+                    <span className="home-page__create-hint">{t.home.createCourseCardHint}</span>
+                  </button>
                 </li>
-              ) : null}
-              {courses.map((course) => {
-                const courseId = normalizeCourseId(course)
-                const courseName =
-                  course.course_name ?? course.name ?? t.home.untitledCourse
-                const stats = courseId ? courseStatsById[courseId] : null
-                const statsPending = courseStatsLoading && !stats
-                const docCount = stats?.documentCount ?? 0
-                const progressPct = stats?.progressPercent ?? 0
-                const lastUpdatedIso =
-                  stats?.lastUpdatedIso ??
-                  (typeof (course.created_at ?? course.createdAt) === 'string'
-                    ? course.created_at ?? course.createdAt
-                    : null)
-                const activityPhrase = formatRelativeActivity(lastUpdatedIso, lang)
-                const activityTime = activityPhrase ?? t.home.courseMetaUnknown
-                const activityLabel = tx(t.home.courseMetaActivity, { time: activityTime })
-                const docsLabel = statsPending
-                  ? t.home.courseMetaDocsLoading
-                  : tx(t.home.courseMetaDocs, { count: docCount })
-                return (
-                  <li key={String(courseId || courseName)} className="home-page__courses-grid-item">
-                    <div className="home-page__course-card-shell">
-                      <button
-                        type="button"
-                        className="home-page__course-card"
-                        onClick={() => {
-                          if (!courseId) return
-                          navigate(`/course/${encodeURIComponent(String(courseId))}`, {
-                            state: { courseName },
-                          })
-                        }}
+              </ul>
+            ) : null}
+          </div>
+
+          <div
+            role="tabpanel"
+            id="home-panel-explore"
+            aria-labelledby="home-tab-explore"
+            className="home-page__courses-panel"
+            hidden={activeCoursesTab !== 'explore'}
+          >
+            {isPublicCoursesLoading ? (
+              <p className="home-page__courses-state">{t.home.exploreCoursesLoading}</p>
+            ) : null}
+
+            {!isPublicCoursesLoading && publicCoursesError ? (
+              <p className="home-page__courses-error" role="alert">
+                {t.home.exploreCoursesError}
+              </p>
+            ) : null}
+
+            {!isPublicCoursesLoading && !publicCoursesError ? (
+              <ul className="home-page__courses-grid">
+                {publicCourses.length === 0 ? (
+                  <li className="home-page__courses-grid-item home-page__courses-grid-item--empty">
+                    <p className="home-page__courses-state">{t.home.exploreCoursesEmpty}</p>
+                  </li>
+                ) : null}
+                {publicCourses.map((course) => {
+                  const courseId = normalizeCourseId(course)
+                  const courseName =
+                    course.course_name ?? course.name ?? t.home.untitledCourse
+                  const isOwner = course.is_owner === true
+
+                  if (isOwner) {
+                    return (
+                      <li
+                        key={String(courseId || courseName)}
+                        className="home-page__courses-grid-item"
                       >
+                        {renderOwnerCourseCard(course)}
+                      </li>
+                    )
+                  }
+
+                  const docCount = course.document_count ?? 0
+                  const activityPhrase = formatRelativeActivity(course.last_updated_at, lang)
+                  const activityTime = activityPhrase ?? t.home.courseMetaUnknown
+                  const activityLabel = tx(t.home.courseMetaActivity, { time: activityTime })
+                  const docsLabel = tx(t.home.courseMetaDocs, { count: docCount })
+
+                  return (
+                    <li
+                      key={String(courseId || courseName)}
+                      className="home-page__courses-grid-item"
+                    >
+                      <div className="home-page__course-card home-page__course-card--static">
                         <div className="home-page__course-card-body">
                           <span className="home-page__course-name">{courseName}</span>
-                          <div
-                            className="home-page__course-meta"
-                            aria-label={
-                              statsPending ? t.home.courseCardMetaLoadingAria : undefined
-                            }
-                          >
-                            <span
-                              className={`home-page__course-meta-item${statsPending ? ' home-page__course-meta-item--pending' : ''}`}
-                            >
+                          <div className="home-page__course-meta">
+                            <span className="home-page__course-meta-item">
                               <IconMetaDoc />
                               <span>{docsLabel}</span>
                             </span>
-                            <span
-                              className={`home-page__course-meta-item${statsPending ? ' home-page__course-meta-item--pending' : ''}`}
-                            >
+                            <span className="home-page__course-meta-item">
                               <IconMetaClock />
                               <span>{activityLabel}</span>
                             </span>
                           </div>
-                          <div
-                            className="home-page__course-progress-block"
-                            aria-busy={statsPending ? 'true' : undefined}
-                          >
-                            <div className="home-page__course-progress-labels">
-                              <span>{t.home.progressLabel}</span>
-                              <span>{progressPct}%</span>
-                            </div>
-                            <div
-                              className="home-page__course-progress-track"
-                              role="progressbar"
-                              aria-valuenow={progressPct}
-                              aria-valuemin={0}
-                              aria-valuemax={100}
-                              aria-label={t.home.progressLabel}
-                            >
-                              <span
-                                className="home-page__course-progress-fill"
-                                style={{ width: `${progressPct}%` }}
-                              />
-                            </div>
-                          </div>
                         </div>
-                        <IconChevronEnd />
-                      </button>
-                      <button
-                        type="button"
-                        className="home-page__course-delete-btn"
-                        onClick={(e) => handleDeleteCourseClick(e, course)}
-                        disabled={isDeletingCourse}
-                        aria-label={tx(t.home.deleteCourseAria, { name: courseName })}
-                      >
-                        <IconTrash />
-                      </button>
-                    </div>
-                  </li>
-                )
-              })}
-              <li className="home-page__courses-grid-item">
-                <button
-                  type="button"
-                  className="home-page__course-card home-page__course-card--create"
-                  onClick={() => setIsCreateCourseOpen(true)}
-                >
-                  <span className="home-page__create-fab" aria-hidden>
-                    <IconPlus />
-                  </span>
-                  <span className="home-page__course-name home-page__course-name--create">{t.home.createCourse}</span>
-                  <span className="home-page__create-hint">{t.home.createCourseCardHint}</span>
-                </button>
-              </li>
-            </ul>
-          ) : null}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            ) : null}
+          </div>
         </section>
       </section>
 

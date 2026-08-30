@@ -17,6 +17,7 @@ flowchart TD
     APIGW --> L1[create_user]
     APIGW --> L2[create_course]
     APIGW --> L3[get_courses]
+    APIGW --> L17[get_public_courses]
     APIGW --> L4[generate_upload_url]
     APIGW --> L5[get_course_documents]
     APIGW --> L6[delete_document]
@@ -32,6 +33,7 @@ flowchart TD
     L1 --> DDB
     L2 --> DDB
     L3 --> DDB
+    L17 --> DDB
     L4 --> DDB
     L4 --> S3Raw
     L5 --> DDB
@@ -63,6 +65,6 @@ flowchart TD
 
 ## Trigger Summary
 
-- **User-triggered via API Gateway:** all functions except `process_document` and `generate_questions worker_handler`.
+- **User-triggered via API Gateway:** all functions except `process_document` and `generate_questions worker_handler` (including `get_public_courses` for `GET /courses/public`).
 - **Event-triggered:** `process_document` is triggered by S3 object creation in the raw uploads bucket.
 - **Lambda-to-Lambda async trigger:** `generate_questions api_handler` invokes `generate_questions worker_handler` asynchronously.
