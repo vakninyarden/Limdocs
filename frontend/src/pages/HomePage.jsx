@@ -8,12 +8,14 @@ import {
 } from 'aws-amplify/auth'
 import './HomePage.css'
 import limdocsLogo from '../assets/logo_limdocs_final.png'
+import CourseVisibilityBadge from '../components/CourseVisibilityBadge.jsx'
 import { useLanguageControl } from '../language-control/LanguageControlProvider.jsx'
 import { deleteCourse, getCourseProgress, getPublicCourses, getUserCourses } from '../services/coursesService.js'
 import { getCourseDocuments } from '../services/documentsService.js'
 import { buildCourseCardStats } from '../utils/courseCardStats.js'
+import { normalizeCourseVisibility } from '../utils/courseVisibility.js'
 
-function IconHome() {
+function IconNavCourses() {
   return (
     <svg className="home-page__nav-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden>
       <path
@@ -22,7 +24,23 @@ function IconHome() {
         strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
-        d="M3 10.25 12 3l9 7.25V20a.75.75 0 01-.75.75h-4.5v-6h-3v6H3.75A.75.75 0 013 20v-9.75z"
+        d="M4 19.5A2.5 2.5 0 016.5 17H20M4 4.5A2.5 2.5 0 016.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15z"
+      />
+    </svg>
+  )
+}
+
+function IconNavExplore() {
+  return (
+    <svg className="home-page__nav-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden>
+      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88z"
       />
     </svg>
   )
@@ -268,6 +286,8 @@ function pickDisplayInitials(name) {
 
 function OwnerCourseCard({
   courseName,
+  visibility,
+  visibilityLabels,
   docsLabel,
   activityLabel,
   progressPct,
@@ -283,7 +303,10 @@ function OwnerCourseCard({
     <div className="home-page__course-card-shell">
       <button type="button" className="home-page__course-card" onClick={onOpen}>
         <div className="home-page__course-card-body">
-          <span className="home-page__course-name">{courseName}</span>
+          <div className="home-page__course-card-title-row">
+            <span className="home-page__course-name">{courseName}</span>
+            <CourseVisibilityBadge visibility={visibility} labels={visibilityLabels} />
+          </div>
           <div
             className="home-page__course-meta"
             aria-label={statsPending ? metaLoadingAria : undefined}
@@ -365,7 +388,6 @@ export default function HomePage() {
   const [publicCoursesError, setPublicCoursesError] = useState('')
   const statsFetchGenerationRef = useRef(0)
   const publicFetchGenerationRef = useRef(0)
-  const tabRefs = useRef({ mine: null, explore: null })
   const apiBaseUrl = import.meta.env.VITE_API_URL ?? ''
   const [courseDraft, setCourseDraft] = useState({
     name: '',
@@ -698,34 +720,8 @@ export default function HomePage() {
     }
   }
 
-  const handleCoursesTabKeyDown = (event) => {
-    const tabOrder = ['mine', 'explore']
-    const currentIndex = tabOrder.indexOf(activeCoursesTab)
-    if (currentIndex < 0) return
-
-    if (event.key === 'Home') {
-      event.preventDefault()
-      const nextId = tabOrder[0]
-      setActiveCoursesTab(nextId)
-      tabRefs.current[nextId]?.focus()
-      return
-    }
-    if (event.key === 'End') {
-      event.preventDefault()
-      const nextId = tabOrder[tabOrder.length - 1]
-      setActiveCoursesTab(nextId)
-      tabRefs.current[nextId]?.focus()
-      return
-    }
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-
-    event.preventDefault()
-    const delta =
-      event.key === 'ArrowRight' ? (dir === 'rtl' ? -1 : 1) : dir === 'rtl' ? 1 : -1
-    const nextIndex = (currentIndex + delta + tabOrder.length) % tabOrder.length
-    const nextId = tabOrder[nextIndex]
-    setActiveCoursesTab(nextId)
-    tabRefs.current[nextId]?.focus()
+  const handleSelectCoursesView = (view) => {
+    setActiveCoursesTab(view)
   }
 
   const renderOwnerCourseCard = (course) => {
@@ -751,6 +747,8 @@ export default function HomePage() {
     return (
       <OwnerCourseCard
         courseName={courseName}
+        visibility={normalizeCourseVisibility(course.visibility)}
+        visibilityLabels={t.home}
         docsLabel={docsLabel}
         activityLabel={activityLabel}
         progressPct={progressPct}
@@ -796,9 +794,23 @@ export default function HomePage() {
         </div>
 
         <nav className="home-page__menu" aria-label={t.home.navLabel}>
-          <button type="button" className="home-page__menu-item home-page__menu-item--active">
-            <IconHome />
-            <span>{t.home.dashboard}</span>
+          <button
+            type="button"
+            className={`home-page__menu-item${activeCoursesTab === 'mine' ? ' home-page__menu-item--active' : ''}`}
+            aria-current={activeCoursesTab === 'mine' ? 'page' : undefined}
+            onClick={() => handleSelectCoursesView('mine')}
+          >
+            <IconNavCourses />
+            <span>{t.home.myCourses}</span>
+          </button>
+          <button
+            type="button"
+            className={`home-page__menu-item${activeCoursesTab === 'explore' ? ' home-page__menu-item--active' : ''}`}
+            aria-current={activeCoursesTab === 'explore' ? 'page' : undefined}
+            onClick={() => handleSelectCoursesView('explore')}
+          >
+            <IconNavExplore />
+            <span>{t.home.exploreCourses}</span>
           </button>
           <button type="button" className="home-page__menu-item">
             <IconNavDocuments />
@@ -877,43 +889,9 @@ export default function HomePage() {
         <section className="home-page__courses-section" aria-live="polite">
           <header className="home-page__courses-header">
             <div className="home-page__courses-header-text">
-              <div
-                className="home-page__courses-tabs"
-                role="tablist"
-                aria-label={t.home.coursesTabsAria}
-                onKeyDown={handleCoursesTabKeyDown}
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  id="home-tab-mine"
-                  className={`home-page__courses-tab${activeCoursesTab === 'mine' ? ' home-page__courses-tab--active' : ''}`}
-                  aria-selected={activeCoursesTab === 'mine'}
-                  aria-controls="home-panel-mine"
-                  tabIndex={activeCoursesTab === 'mine' ? 0 : -1}
-                  ref={(el) => {
-                    tabRefs.current.mine = el
-                  }}
-                  onClick={() => setActiveCoursesTab('mine')}
-                >
-                  {t.home.tabMyCourses}
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  id="home-tab-explore"
-                  className={`home-page__courses-tab${activeCoursesTab === 'explore' ? ' home-page__courses-tab--active' : ''}`}
-                  aria-selected={activeCoursesTab === 'explore'}
-                  aria-controls="home-panel-explore"
-                  tabIndex={activeCoursesTab === 'explore' ? 0 : -1}
-                  ref={(el) => {
-                    tabRefs.current.explore = el
-                  }}
-                  onClick={() => setActiveCoursesTab('explore')}
-                >
-                  {t.home.tabExploreCourses}
-                </button>
-              </div>
+              <h2 id="home-courses-heading" className="home-page__courses-title">
+                {activeCoursesTab === 'mine' ? t.home.myCourses : t.home.exploreCourses}
+              </h2>
               <p className="home-page__courses-subtitle">
                 {activeCoursesTab === 'mine'
                   ? t.home.myCoursesSubtitle
@@ -929,9 +907,9 @@ export default function HomePage() {
           </header>
 
           <div
-            role="tabpanel"
             id="home-panel-mine"
-            aria-labelledby="home-tab-mine"
+            role="region"
+            aria-labelledby="home-courses-heading"
             className="home-page__courses-panel"
             hidden={activeCoursesTab !== 'mine'}
           >
@@ -982,9 +960,9 @@ export default function HomePage() {
           </div>
 
           <div
-            role="tabpanel"
             id="home-panel-explore"
-            aria-labelledby="home-tab-explore"
+            role="region"
+            aria-labelledby="home-courses-heading"
             className="home-page__courses-panel"
             hidden={activeCoursesTab !== 'explore'}
           >
@@ -1035,7 +1013,13 @@ export default function HomePage() {
                     >
                       <div className="home-page__course-card home-page__course-card--static">
                         <div className="home-page__course-card-body">
-                          <span className="home-page__course-name">{courseName}</span>
+                          <div className="home-page__course-card-title-row">
+                            <span className="home-page__course-name">{courseName}</span>
+                            <CourseVisibilityBadge
+                              visibility={normalizeCourseVisibility(course.visibility)}
+                              labels={t.home}
+                            />
+                          </div>
                           <div className="home-page__course-meta">
                             <span className="home-page__course-meta-item">
                               <IconMetaDoc />

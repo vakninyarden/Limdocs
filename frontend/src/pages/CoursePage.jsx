@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from '
 import { fetchAuthSession, getCurrentUser } from 'aws-amplify/auth'
 import './CoursePage.css'
 import TopicScoreChart from '../components/TopicScoreChart.jsx'
+import CourseVisibilityBadge from '../components/CourseVisibilityBadge.jsx'
 import { useLanguageControl } from '../language-control/LanguageControlProvider.jsx'
 import {
   deleteAttempt,
@@ -12,6 +13,7 @@ import {
   getCourseProgress,
   getUserCourses,
   submitAttempt,
+  updateCourseVisibility,
 } from '../services/coursesService.js'
 import {
   deleteDocument,
@@ -25,6 +27,7 @@ import {
   uploadFileToS3,
 } from '../services/documentsService.js'
 import { resolveProgressTopics } from '../utils/topicScoring.js'
+import { normalizeCourseVisibility } from '../utils/courseVisibility.js'
 
 const FINAL_PROCESSING_STATUSES = new Set(['READY', 'FAILED', 'ERROR'])
 const QUIZ_ELIGIBLE_STATUSES = new Set(['READY', 'FAILED'])
@@ -512,9 +515,15 @@ export default function CoursePage() {
   const [progressTopics, setProgressTopics] = useState(null)
   const [progressLoading, setProgressLoading] = useState(false)
   const [progressError, setProgressError] = useState(null)
+  const [courseVisibility, setCourseVisibility] = useState(null)
+  const [canEditVisibility, setCanEditVisibility] = useState(false)
+  const [isVisibilitySaving, setIsVisibilitySaving] = useState(false)
+  const [visibilityNotice, setVisibilityNotice] = useState(null)
+  const [isConfirmPublicOpen, setIsConfirmPublicOpen] = useState(false)
   const fileInputRef = useRef(null)
   const dragDepthRef = useRef(0)
   const skipSetAutoLoadRef = useRef(false)
+  const visibilitySavingRef = useRef(false)
 
   const initialCourseName =
     typeof location.state?.courseName === 'string' ? location.state.courseName.trim() : ''
@@ -528,8 +537,9 @@ export default function CoursePage() {
   }, [initialCourseName, courseName])
 
   useEffect(() => {
-    if (!courseId || courseName) return
+    if (!courseId) return undefined
     let cancelled = false
+    setCanEditVisibility(false)
 
     ;(async () => {
       try {
@@ -547,21 +557,24 @@ export default function CoursePage() {
               return id === courseId
             })
           : null
+        if (!matchedCourse) return
         const fallbackName = String(
           matchedCourse?.course_name ?? matchedCourse?.name ?? '',
         ).trim()
         if (fallbackName) {
           setCourseName(fallbackName)
         }
+        setCourseVisibility(normalizeCourseVisibility(matchedCourse.visibility))
+        setCanEditVisibility(true)
       } catch {
-        // Keep UI fallback title when metadata fetch fails.
+        // Keep UI fallback title when metadata fetch fails; hide visibility control.
       }
     })()
 
     return () => {
       cancelled = true
     }
-  }, [courseId, courseName])
+  }, [courseId])
 
   const loadDocuments = useCallback(async ({ silent = false } = {}) => {
     if (!courseId) return null
@@ -967,6 +980,61 @@ export default function CoursePage() {
     setDeleteCourseError(null)
   }, [isDeletingCourse])
 
+  const closeConfirmPublicModal = useCallback(() => {
+    if (visibilitySavingRef.current) return
+    setIsConfirmPublicOpen(false)
+  }, [])
+
+  const applyVisibility = useCallback(
+    async (nextVisibility) => {
+      if (!courseId || visibilitySavingRef.current) return
+      if (courseVisibility === nextVisibility) return
+      visibilitySavingRef.current = true
+      setIsVisibilitySaving(true)
+      setVisibilityNotice(null)
+      try {
+        const session = await fetchAuthSession()
+        const idToken = session.tokens?.idToken?.toString()
+        if (!idToken) {
+          setVisibilityNotice({
+            kind: 'alert',
+            message: t.coursePage.visibilityMissingSession,
+          })
+          return
+        }
+        const result = await updateCourseVisibility(courseId, nextVisibility, idToken)
+        setCourseVisibility(normalizeCourseVisibility(result?.visibility))
+        setIsConfirmPublicOpen(false)
+        setVisibilityNotice({
+          kind: 'status',
+          message: t.coursePage.visibilitySuccess,
+        })
+      } catch {
+        setVisibilityNotice({
+          kind: 'alert',
+          message: t.coursePage.visibilityError,
+        })
+      } finally {
+        visibilitySavingRef.current = false
+        setIsVisibilitySaving(false)
+      }
+    },
+    [courseId, courseVisibility, t.coursePage],
+  )
+
+  const handleVisibilityChange = useCallback(
+    (nextVisibility) => {
+      if (isVisibilitySaving || visibilitySavingRef.current) return
+      if (nextVisibility === courseVisibility) return
+      if (nextVisibility === 'PUBLIC' && courseVisibility === 'PRIVATE') {
+        setIsConfirmPublicOpen(true)
+        return
+      }
+      applyVisibility(nextVisibility)
+    },
+    [applyVisibility, courseVisibility, isVisibilitySaving],
+  )
+
   const addFiles = useCallback((files) => {
     if (!files.length) return
     setSelectedFiles((prev) => mergeFileLists(prev, files))
@@ -1134,6 +1202,15 @@ export default function CoursePage() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [isQuizGenerateModalOpen, isGeneratingQuiz, closeQuizGenerateModal])
+
+  useEffect(() => {
+    if (!isConfirmPublicOpen) return undefined
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape' && !visibilitySavingRef.current) closeConfirmPublicModal()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isConfirmPublicOpen, closeConfirmPublicModal])
 
   useEffect(() => {
     if (!quizStartedNotice) return undefined
@@ -1549,6 +1626,60 @@ export default function CoursePage() {
           <p className="course-page__materials-stat" aria-live="polite">
             {tx(t.coursePage.materialsCountStat, { count: materialsCount })}
           </p>
+          {canEditVisibility && courseVisibility ? (
+            <div className="course-page__visibility">
+              <div className="course-page__visibility-row">
+                <CourseVisibilityBadge visibility={courseVisibility} labels={t.home} />
+                <fieldset
+                  className="course-page__visibility-group"
+                  disabled={isVisibilitySaving}
+                  aria-label={t.coursePage.visibilityControlAria}
+                >
+                  <legend className="course-page__visibility-legend">{t.home.visibilityLabel}</legend>
+                  <label className="course-page__visibility-option">
+                    <input
+                      type="radio"
+                      name="course-visibility"
+                      value="PRIVATE"
+                      checked={courseVisibility === 'PRIVATE'}
+                      disabled={isVisibilitySaving}
+                      onChange={() => handleVisibilityChange('PRIVATE')}
+                    />
+                    <span>{t.home.visibilityPrivate}</span>
+                  </label>
+                  <label className="course-page__visibility-option">
+                    <input
+                      type="radio"
+                      name="course-visibility"
+                      value="PUBLIC"
+                      checked={courseVisibility === 'PUBLIC'}
+                      disabled={isVisibilitySaving}
+                      onChange={() => handleVisibilityChange('PUBLIC')}
+                    />
+                    <span>{t.home.visibilityPublic}</span>
+                  </label>
+                </fieldset>
+              </div>
+              <p className="course-page__visibility-helper">{t.coursePage.visibilityHelper}</p>
+              {isVisibilitySaving ? (
+                <p className="course-page__visibility-feedback" role="status">
+                  {t.coursePage.visibilitySaving}
+                </p>
+              ) : null}
+              {visibilityNotice ? (
+                <p
+                  className={
+                    visibilityNotice.kind === 'alert'
+                      ? 'course-page__visibility-feedback course-page__visibility-feedback--alert'
+                      : 'course-page__visibility-feedback'
+                  }
+                  role={visibilityNotice.kind === 'alert' ? 'alert' : 'status'}
+                >
+                  {visibilityNotice.message}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </header>
 
@@ -2527,6 +2658,46 @@ export default function CoursePage() {
                 {isDeletingCourse
                   ? t.coursePage.deleteCourseDeleting
                   : t.coursePage.deleteCourseConfirm}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {isConfirmPublicOpen ? (
+        <div
+          className="course-page__modal-backdrop"
+          role="presentation"
+          onClick={closeConfirmPublicModal}
+        >
+          <section
+            className="course-page__modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="course-confirm-public-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="course-confirm-public-modal-title" className="course-page__modal-title">
+              {t.coursePage.visibilityConfirmTitle}
+            </h2>
+            <p className="course-page__modal-subtitle">{t.coursePage.visibilityConfirmPrompt}</p>
+            <div className="course-page__modal-actions">
+              <button
+                type="button"
+                className="course-page__modal-cancel"
+                disabled={isVisibilitySaving}
+                onClick={closeConfirmPublicModal}
+              >
+                {t.home.cancel}
+              </button>
+              <button
+                type="button"
+                className="course-page__modal-submit"
+                disabled={isVisibilitySaving}
+                onClick={() => applyVisibility('PUBLIC')}
+              >
+                {isVisibilitySaving
+                  ? t.coursePage.visibilitySaving
+                  : t.coursePage.visibilityConfirmCta}
               </button>
             </div>
           </section>

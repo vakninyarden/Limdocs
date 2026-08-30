@@ -3,7 +3,7 @@
 .home-page {
   --home-ease-lift: cubic-bezier(0.22, 1, 0.36, 1);
   --home-content-pad: clamp(1.25rem, 3vw, 2.25rem);
-  --home-course-card-height: 168px;
+  --home-course-card-height: 186px;
 
   min-height: 100svh;
   margin: 0;
@@ -114,6 +114,11 @@
   background: var(--active-bg-tint);
   color: var(--brand-blue);
   font-weight: 600;
+}
+
+.home-page__menu-item:focus-visible {
+  outline: 2px solid var(--brand-blue);
+  outline-offset: 2px;
 }
 
 .home-page__sidebar-spacer {
@@ -385,44 +390,6 @@
   max-width: 52ch;
 }
 
-.home-page__courses-tabs {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.home-page__courses-tab {
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  border-radius: 999px;
-  padding: 0.45rem 0.95rem;
-  font-family: inherit;
-  font-size: clamp(1rem, 2vw, 1.15rem);
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  cursor: pointer;
-  transition:
-    background-color 0.2s var(--ease-standard),
-    color 0.2s var(--ease-standard);
-}
-
-.home-page__courses-tab:hover {
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
-}
-
-.home-page__courses-tab--active {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-
-.home-page__courses-tab:focus-visible {
-  outline: 2px solid var(--brand-blue);
-  outline-offset: 2px;
-}
-
 .home-page__courses-panel[hidden] {
   display: none;
 }
@@ -562,6 +529,13 @@
   gap: 0.55rem;
 }
 
+.home-page__course-card-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 .home-page__course-name {
   margin: 0;
   padding-inline-end: 0.25rem;
@@ -574,6 +548,11 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.home-page__course-card-title-row .home-page__course-name {
+  flex: 1;
+  min-width: 0;
 }
 
 .home-page__course-meta {

@@ -1,0 +1,24 @@
+.course-visibility-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  padding-block: 0.28rem;
+  padding-inline: 0.58rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.course-visibility-badge--public {
+  color: var(--accent);
+  background: var(--active-bg-tint);
+}
+
+.course-visibility-badge--private {
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+}

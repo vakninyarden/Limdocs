@@ -17,7 +17,7 @@ Limdocs is an adaptive learning platform for students: create course spaces, upl
 
 - **Sign up and sign in** with AWS Cognito (email/username), including account confirmation; sync profile via `POST /users` after signup
 - **Switch Hebrew ↔ English** with persisted preference and full RTL/LTR layout
-- **Create and manage courses** from the dashboard (private or public visibility stored on the course; **browse public courses** on the Home **Explore Courses** tab via `GET /courses/public` — metadata only for courses you do not own; opening another user's course is not supported)
+- **Create and manage courses** from the dashboard (private or public visibility stored on the course; owners can change visibility from the course page via `PATCH /courses/{courseId}/visibility`; **browse public courses** on the Home **Explore Courses** tab via `GET /courses/public`, which follows the `visibility_courses_index` GSI — metadata only for courses you do not own; opening another user's course is not supported)
 - **Upload materials** via S3 pre-signed URLs (PDF, PNG, JPEG; **20 MB** max per file via `file_size_bytes`)
 - **Process documents** asynchronously: S3 `uploads/` trigger → Textract → bilingual sub-topic extraction (OpenAI) → `READY` with topic chips on the Materials tab
 - **Generate question sets** from one or more `READY` documents: async API + worker Lambdas, UI polling until documents leave `GENERATING`, optional **5/10/15/20** questions, **Hebrew or English** quiz language, and **weakness-focused** mode that prioritizes your weakest topics from `user_progress`
@@ -57,7 +57,7 @@ Owner-only authorization for course-scoped APIs is enforced in Lambda via `cours
 | **Cognito User Pool** | Authentication for the SPA |
 | **AWS Amplify Hosting** | Frontend hosting and CI/CD deployment from GitHub |
 | **API Gateway** | REST API (`/prod` stage), default Cognito authorizer |
-| **Lambda** | 17 functions: HTTP handlers, `process_document` (S3), `generate_questions` API + worker (async, no retries) |
+| **Lambda** | 18 functions: HTTP handlers, `process_document` (S3), `generate_questions` API + worker (async, no retries) |
 | **DynamoDB** | `users`, `courses`, `documents`, `question_sets`, `questions`, `attempts`, `attempt_answers`, `user_progress` |
 | **S3** | Raw uploads (`limdocs-raw-uploads-{account}`) and processed text (`limdocs-processed-outputs-{account}`) |
 | **Textract** | OCR for uploaded PDFs/images |
@@ -184,6 +184,7 @@ All routes require Cognito auth unless noted. Owner checks apply on course-scope
 | `POST` | `/users` | Sync user profile after signup |
 | `POST` | `/courses` | Create course (`course_name`, `description`, `is_public`) |
 | `GET` | `/courses/public` | List all public courses (sanitized metadata; `is_owner` derived from token `sub`). Reserved literal segment under `/courses/`. |
+| `PATCH` | `/courses/{courseId}/visibility` | Owner-only: set `visibility` to `PUBLIC` or `PRIVATE`. Updates the `visibility_courses_index` GSI used by Explore. |
 | `GET` | `/users/{userId}/courses` | List caller's courses (`userId` must match token `sub`) |
 | `DELETE` | `/courses/{courseId}` | Delete course and all related data |
 | `POST` | `/courses/{courseId}/upload-url` | Pre-signed upload + document row (`file_name`, `file_type`, `file_size_bytes`) |

@@ -67,6 +67,30 @@ export async function deleteCourse(courseId, idToken) {
   return response?.data ?? {}
 }
 
+export async function updateCourseVisibility(courseId, visibility, idToken) {
+  if (!apiBaseUrl) {
+    throw new Error('API is not configured. Set VITE_API_URL.')
+  }
+  if (!courseId) {
+    throw new Error('Missing courseId.')
+  }
+  if (!idToken) {
+    throw new Error('Missing idToken.')
+  }
+
+  const response = await axios.patch(
+    `${apiBaseUrl}/courses/${encodeURIComponent(courseId)}/visibility`,
+    { visibility },
+    {
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+      },
+    },
+  )
+
+  return response?.data ?? {}
+}
+
 export async function submitAttempt(courseId, setId, payload, idToken) {
   if (!apiBaseUrl) {
     throw new Error('API is not configured. Set VITE_API_URL.')

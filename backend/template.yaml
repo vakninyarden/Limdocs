@@ -269,7 +269,7 @@ Resources:
       Cors:
         AllowOrigin: "'*'"
         AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
-        AllowMethods: "'OPTIONS,GET,POST,PUT,DELETE'"
+        AllowMethods: "'OPTIONS,GET,POST,PUT,PATCH,DELETE'"
       Auth:
         DefaultAuthorizer: LimdocsAuth
         AddDefaultAuthorizerToCorsPreflight: false
@@ -373,6 +373,26 @@ Resources:
             RestApiId: !Ref LimdocsApi
             Path: /courses/public
             Method: get
+
+  UpdateCourseVisibilityFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: limdocs-update-course-visibility
+      CodeUri: src/
+      Handler: update_course_visibility.lambda_handler
+      Runtime: python3.9
+      # LabRole must include dynamodb:GetItem and dynamodb:UpdateItem on courses.
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Environment:
+        Variables:
+          COURSES_TABLE: !Ref LimdocsCoursesTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref LimdocsApi
+            Path: /courses/{courseId}/visibility
+            Method: patch
 
   GenerateUploadUrlFunction:
     Type: AWS::Serverless::Function
