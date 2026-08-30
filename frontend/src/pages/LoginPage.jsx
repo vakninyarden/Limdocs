@@ -9,6 +9,7 @@ import {
 } from 'aws-amplify/auth'
 import './LoginPage.css'
 import { useLanguageControl } from '../language-control/LanguageControlProvider.jsx'
+import limdocsSymbol from '../assets/limdocs-symbol.png'
 
 function logAuthError(context, error) {
   const message = error?.message ?? String(error)
@@ -444,9 +445,12 @@ export default function LoginPage({ initialMode = 'login' }) {
           </button>
         </div>
         <header className="login-page__brand">
-          <div className="login-page__logo" aria-hidden>
-            L
-          </div>
+          <img
+            className="login-page__logo"
+            src={limdocsSymbol}
+            alt=""
+            aria-hidden
+          />
           <h1 className="login-page__title">{t.login.brandTitle}</h1>
           <p className="login-page__subtitle">{t.login.brandSubtitle}</p>
         </header>

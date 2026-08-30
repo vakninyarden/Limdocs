@@ -72,24 +72,11 @@
 }
 
 .login-page__logo {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 52px;
-  height: 52px;
-  border-radius: 14px;
-  background: var(--btn-primary-face);
-  border: var(--btn-primary-border);
-  color: var(--text-on-accent);
-  font-weight: 700;
-  font-size: 1.35rem;
-  letter-spacing: -0.02em;
-  margin-bottom: 0.75rem;
-  box-shadow: var(--btn-primary-shadow);
-  transition:
-    transform 0.2s var(--ease-standard),
-    box-shadow 0.2s var(--ease-standard),
-    filter 0.2s var(--ease-standard);
+  display: block;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 0.85rem;
+  object-fit: contain;
 }
 
 .login-page__title {
