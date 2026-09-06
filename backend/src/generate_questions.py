@@ -1,7 +1,10 @@
 import json
 import logging
 import os
+import re
+import unicodedata
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from uuid import uuid4
 
 import boto3
@@ -114,6 +117,13 @@ def _build_system_prompt(
         "  - Do NOT fill gaps with generic or plausible-sounding but unsupported content.\n"
         "- Explanations must reflect reasoning traceable to the source (without fabricating "
         "citations).\n\n"
+        "SOURCE EVIDENCE (STRICT):\n"
+        "- Every question MUST include source_evidence: a short passage copied from the "
+        "provided source text.\n"
+        "- The passage must support the question and its correct answer.\n"
+        "- Prefer a near-verbatim excerpt. Do not invent evidence and do not translate it.\n"
+        "- The backend automatically checks that this passage appears in the source. "
+        "Invented evidence causes the quiz to be rejected.\n\n"
         "Difficulty: assign Easy, Medium, or Hard based on academic depth.\n"
         "Cross-document synthesis: ensure at least 1–2 questions synthesize or compare "
         "information across multiple provided documents when multiple documents are present.\n\n"
@@ -121,7 +131,9 @@ def _build_system_prompt(
         "array of question objects. Each question object must include:\n"
         "question (string), options (array of exactly 4 strings), correct_index (integer 0–3),\n"
         "explanation (string), topics (array of strings from the allowed list only),\n"
-        "difficulty (Easy|Medium|Hard), answer (string) — must equal options[correct_index].\n"
+        "difficulty (Easy|Medium|Hard), answer (string) — must equal options[correct_index],\n"
+        "source_evidence (string) — short verbatim source excerpt supporting the question "
+        "and correct answer.\n"
         f"{weak_block}"
     )
 
@@ -138,6 +150,7 @@ def _build_question_response_schema(allowed_topic_names, requested_question_coun
             "topics",
             "difficulty",
             "answer",
+            "source_evidence",
         ],
         "properties": {
             "question": {"type": "string"},
@@ -159,6 +172,15 @@ def _build_question_response_schema(allowed_topic_names, requested_question_coun
                 "enum": ["Easy", "Medium", "Hard"],
             },
             "answer": {"type": "string"},
+            "source_evidence": {
+                "type": "string",
+                "minLength": 1,
+                "description": (
+                    "Short verbatim excerpt copied from the provided source text "
+                    "that supports the question and its correct answer. "
+                    "Do not invent, paraphrase loosely, or translate."
+                ),
+            },
         },
     }
     return {
@@ -231,6 +253,183 @@ def _build_balanced_context(texts):
     return "\n\n".join(parts), budgets
 
 
+_INVISIBLE_FORMAT_RE = re.compile(r"[\u200b-\u200f\ufeff\u202a-\u202e\u2066-\u2069]")
+_ELLIPSIS_RE = re.compile(r"\.{3,}")
+_SENTENCE_BREAK_RE = re.compile(r"(?<=[.!?])\s+")
+_MIN_FRAGMENT_LEN = 12
+_TOKEN_RECALL_THRESHOLD = 0.75
+_SEQUENCE_RATIO_THRESHOLD = 0.72
+_TYPOGRAPHY_TRANSLATION = str.maketrans(
+    {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2212": "-",
+    }
+)
+
+
+def _normalize_evidence_text(text):
+    if not isinstance(text, str):
+        return ""
+    normalized = unicodedata.normalize("NFC", text)
+    normalized = _INVISIBLE_FORMAT_RE.sub("", normalized)
+    normalized = normalized.replace("\u2026", "...")
+    normalized = normalized.translate(_TYPOGRAPHY_TRANSLATION)
+    normalized = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+    normalized = normalized.casefold()
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
+
+
+def _strip_punct_keep_spaces(text):
+    stripped = "".join(ch if ch.isalnum() or ch.isspace() else "" for ch in text)
+    return re.sub(r"\s+", " ", stripped).strip()
+
+
+def _alnum_tokens(text):
+    stripped = _strip_punct_keep_spaces(text)
+    return stripped.split() if stripped else []
+
+
+def _window_starts(length, window, step):
+    if length <= window:
+        return [0]
+    starts = list(range(0, length - window + 1, step))
+    last = length - window
+    if starts[-1] != last:
+        starts.append(last)
+    return starts
+
+
+def _best_window_ratio(evidence, source):
+    if not evidence or not source:
+        return 0.0
+    ev_len = len(evidence)
+    src_len = len(source)
+    if ev_len >= src_len:
+        return SequenceMatcher(None, evidence, source, autojunk=False).ratio()
+    window = ev_len
+    step = max(1, window // 2)
+    best = 0.0
+    for start in _window_starts(src_len, window, step):
+        chunk = source[start : start + window]
+        ratio = SequenceMatcher(None, evidence, chunk, autojunk=False).ratio()
+        if ratio > best:
+            best = ratio
+            if best >= 1.0:
+                return best
+    return best
+
+
+def _token_recall_in_window(evidence_tokens, source_tokens):
+    if not evidence_tokens:
+        return 0.0
+    ev_n = len(evidence_tokens)
+    if not source_tokens:
+        return 0.0
+    window = max(ev_n, min(len(source_tokens), int(ev_n * 2)))
+    if len(source_tokens) <= window:
+        source_set = set(source_tokens)
+        return sum(1 for token in evidence_tokens if token in source_set) / ev_n
+    step = max(1, ev_n // 2)
+    best = 0.0
+    for start in _window_starts(len(source_tokens), window, step):
+        window_set = set(source_tokens[start : start + window])
+        ratio = sum(1 for token in evidence_tokens if token in window_set) / ev_n
+        if ratio > best:
+            best = ratio
+            if best >= 1.0:
+                return best
+    return best
+
+
+def _evidence_fragments(normalized_evidence):
+    fragments = []
+    for part in _ELLIPSIS_RE.split(normalized_evidence):
+        part = part.strip()
+        if not part:
+            continue
+        for sentence in _SENTENCE_BREAK_RE.split(part):
+            sentence = sentence.strip()
+            if sentence:
+                fragments.append(sentence)
+    return fragments
+
+
+def _fragment_is_in_source(fragment, normalized_source, punct_source):
+    if fragment in normalized_source:
+        return True
+    punct_fragment = _strip_punct_keep_spaces(fragment)
+    return bool(punct_fragment) and punct_fragment in punct_source
+
+
+def _evidence_is_in_source(evidence, source_context):
+    normalized_evidence = _normalize_evidence_text(evidence)
+    if not normalized_evidence:
+        return False
+    normalized_source = _normalize_evidence_text(source_context)
+    if normalized_evidence in normalized_source:
+        return True
+
+    punct_evidence = _strip_punct_keep_spaces(normalized_evidence)
+    punct_source = _strip_punct_keep_spaces(normalized_source)
+    if punct_evidence and punct_evidence in punct_source:
+        return True
+
+    qualifying_fragments = [
+        fragment
+        for fragment in _evidence_fragments(normalized_evidence)
+        if len(fragment) >= _MIN_FRAGMENT_LEN
+    ]
+    if qualifying_fragments and all(
+        _fragment_is_in_source(fragment, normalized_source, punct_source)
+        for fragment in qualifying_fragments
+    ):
+        return True
+
+    evidence_tokens = _alnum_tokens(normalized_evidence)
+    source_tokens = _alnum_tokens(normalized_source)
+    token_recall = _token_recall_in_window(evidence_tokens, source_tokens)
+    sequence_ratio = _best_window_ratio(normalized_evidence, normalized_source)
+    return (
+        token_recall >= _TOKEN_RECALL_THRESHOLD
+        and sequence_ratio >= _SEQUENCE_RATIO_THRESHOLD
+    )
+
+
+def _verify_questions_source_evidence(questions, source_context, correlation_id=None):
+    for index, question in enumerate(questions):
+        evidence = question.get("source_evidence") if isinstance(question, dict) else None
+        if not isinstance(evidence, str) or not evidence.strip():
+            reason = (
+                f"Question {index} is missing source_evidence"
+                if not isinstance(evidence, str)
+                else f"Question {index} has empty source_evidence"
+            )
+            logger.error(
+                "cid=%s source_evidence_failed index=%s reason=%s evidence=%s",
+                correlation_id,
+                index,
+                reason,
+                _truncate_for_log(evidence if isinstance(evidence, str) else ""),
+            )
+            raise ValueError(reason)
+        if not _evidence_is_in_source(evidence, source_context):
+            reason = f"Question {index} source_evidence was not found in the source"
+            logger.error(
+                "cid=%s source_evidence_failed index=%s reason=%s evidence=%s",
+                correlation_id,
+                index,
+                reason,
+                _truncate_for_log(evidence),
+            )
+            raise ValueError(reason)
+
+
 def _normalize_question(item, *, canonical_lookup=None):
     if not isinstance(item, dict):
         return None
@@ -300,7 +499,7 @@ def _normalize_question(item, *, canonical_lookup=None):
     if normalized_difficulty not in _ALLOWED_DIFFICULTIES:
         normalized_difficulty = "Medium"
 
-    return {
+    normalized = {
         "question": question.strip(),
         "options": normalized_options,
         "correct_index": resolved_correct_index,
@@ -308,6 +507,10 @@ def _normalize_question(item, *, canonical_lookup=None):
         "topics": canonical_topics,
         "difficulty": normalized_difficulty,
     }
+    source_evidence = item.get("source_evidence")
+    if isinstance(source_evidence, str) and source_evidence.strip():
+        normalized["source_evidence"] = source_evidence.strip()
+    return normalized
 
 
 def _parse_valid_questions(raw_response, canonical_lookup=None):
@@ -771,6 +974,10 @@ def _generate_questions_worker(
         raise ValueError(
             f"Expected {requested_question_count} valid questions, got {len(valid_questions)}"
         )
+
+    _verify_questions_source_evidence(valid_questions, input_text, correlation_id)
+    for question in valid_questions:
+        question.pop("source_evidence", None)
 
     set_id = str(uuid4())
     created_at = datetime.now(timezone.utc).isoformat()
