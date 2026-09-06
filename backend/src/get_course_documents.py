@@ -4,8 +4,7 @@ import os
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from course_access import require_course_owner
-from openai_helpers import ensure_document_topics
+from course_access import ACCESS_OWNER, resolve_course_access
 from openai_helpers import ensure_document_topics
 
 DOCUMENTS_TABLE = os.environ["DOCUMENTS_TABLE"]
@@ -35,6 +34,13 @@ def _response(status_code, payload, allow_methods="GET,OPTIONS"):
     }
 
 
+def _sanitize_public_document(item):
+    return {
+        "document_id": item.get("document_id"),
+        "original_file_name": item.get("original_file_name"),
+    }
+
+
 def lambda_handler(event, context):
     del context
     try:
@@ -55,19 +61,20 @@ def lambda_handler(event, context):
         if not course_id:
             return _response(400, {"message": "Missing path parameter: courseId"})
 
-        gate = require_course_owner(_courses_table, course_id, user_sub)
-        if gate:
-            status, body = gate
+        mode, payload = resolve_course_access(_courses_table, course_id, user_sub)
+        if mode is None:
+            status, body = payload
             return _response(status, body)
 
         query_result = _table.query(
             IndexName=INDEX_NAME,
             KeyConditionExpression=Key("course_id").eq(course_id),
         )
-        items = [
-            ensure_document_topics(dict(item))
-            for item in query_result.get("Items", [])
-        ]
+        raw_items = query_result.get("Items", [])
+        if mode == ACCESS_OWNER:
+            items = [ensure_document_topics(dict(item)) for item in raw_items]
+        else:
+            items = [_sanitize_public_document(item) for item in raw_items]
 
         return _response(200, {"documents": items})
     except Exception as exc:

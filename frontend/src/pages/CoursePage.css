@@ -35,6 +35,23 @@
   font-size: 0.95rem;
 }
 
+.course-page__access-error {
+  min-height: 40svh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 1rem;
+}
+
+.course-page__access-error-text {
+  margin: 0;
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-size: 1rem;
+  text-align: center;
+  max-inline-size: 40ch;
+}
+
 .course-page__top-bar {
   display: flex;
   align-items: center;

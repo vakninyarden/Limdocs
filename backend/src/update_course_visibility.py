@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 import boto3
 from botocore.exceptions import ClientError
 
+from course_access import ACCESS_OWNER, resolve_course_access
+
 COURSES_TABLE = os.environ["COURSES_TABLE"]
 _ALLOWED_VISIBILITY = frozenset({"PUBLIC", "PRIVATE"})
 
@@ -80,12 +82,13 @@ def lambda_handler(event, context):
         if visibility not in _ALLOWED_VISIBILITY:
             return _response(400, {"message": "Field 'visibility' must be PUBLIC or PRIVATE"})
 
-        result = _table.get_item(Key={"course_id": course_id})
-        item = result.get("Item")
-        if not item:
-            return _response(404, {"message": "Course not found"})
-        if item.get("owner_id") != sub:
+        mode, payload = resolve_course_access(_table, course_id, sub)
+        if mode != ACCESS_OWNER:
+            if mode is None:
+                status, body = payload
+                return _response(status, body)
             return _response(403, {"message": "Forbidden"})
+        item = payload
 
         if item.get("visibility") == visibility:
             return _response(200, _public_payload(item))

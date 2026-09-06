@@ -7,7 +7,7 @@ import boto3
 from botocore.exceptions import ClientError
 from boto3.dynamodb.conditions import Key
 
-from course_access import require_course_owner
+from course_access import require_course_owner, resolve_course_access
 
 QUESTION_SETS_TABLE = os.environ["QUESTION_SETS_TABLE"]
 QUESTIONS_TABLE = os.environ["QUESTIONS_TABLE"]
@@ -253,17 +253,23 @@ def lambda_handler(event, _context):
         if not course_id:
             return _response(400, {"message": "Missing path parameter: courseId"}, route_allow_methods)
 
-        gate = require_course_owner(_courses_table, course_id, user_sub)
-        if gate:
-            status, body = gate
-            return _response(status, body, route_allow_methods)
+        if method == "DELETE":
+            gate = require_course_owner(_courses_table, course_id, user_sub)
+            if gate:
+                status, body = gate
+                return _response(status, body, route_allow_methods)
+            if set_id:
+                return _delete_set(course_id, set_id)
+            return _response(405, {"message": "Method not allowed"}, route_allow_methods)
 
-        if method == "GET" and not set_id:
-            return _list_sets(course_id)
-        if method == "GET" and set_id:
+        if method == "GET":
+            _mode, payload = resolve_course_access(_courses_table, course_id, user_sub)
+            if _mode is None:
+                status, body = payload
+                return _response(status, body, route_allow_methods)
+            if not set_id:
+                return _list_sets(course_id)
             return _get_set_details(course_id, set_id)
-        if method == "DELETE" and set_id:
-            return _delete_set(course_id, set_id)
 
         return _response(405, {"message": "Method not allowed"}, route_allow_methods)
     except Exception:

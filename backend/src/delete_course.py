@@ -5,6 +5,8 @@ import os
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
 
+from course_access import require_course_owner
+
 COURSES_TABLE = os.environ["COURSES_TABLE"]
 DOCUMENTS_TABLE = os.environ["DOCUMENTS_TABLE"]
 QUESTION_SETS_TABLE = os.environ["QUESTION_SETS_TABLE"]
@@ -205,13 +207,10 @@ def lambda_handler(event, context):
         if not course_id:
             return _response(400, {"message": "Missing path parameter: courseId"})
 
-        course_result = _courses_table.get_item(Key={"course_id": course_id})
-        course_item = course_result.get("Item")
-        if not course_item:
-            return _response(404, {"message": "Course not found"})
-
-        if course_item.get("owner_id") != sub:
-            return _response(403, {"message": "Forbidden"})
+        gate = require_course_owner(_courses_table, course_id, sub)
+        if gate:
+            status, body = gate
+            return _response(status, body)
 
         documents = _query_all_documents(course_id)
         for doc in documents:

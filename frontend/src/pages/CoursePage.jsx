@@ -9,9 +9,9 @@ import {
   deleteAttempt,
   deleteCourse,
   getAttemptAnswers,
+  getCourse,
   getCourseAttempts,
   getCourseProgress,
-  getUserCourses,
   submitAttempt,
   updateCourseVisibility,
 } from '../services/coursesService.js'
@@ -277,37 +277,43 @@ function QuestionSetPreviewCard({
   formatDocumentDateFn,
   formatDifficultySummaryFn,
   onStartAttempt,
+  onView,
   onDelete,
   isStarting,
   startDisabled,
   deleteAriaLabel,
+  isReadOnly,
 }) {
   const title = setItem.name || setItem.set_name || labels.questionSetUntitled
   const quizLang = resolveQuizLanguage(setItem)
   const questionCount = resolveSetQuestionCount(setItem)
+  const ctaLabel = isReadOnly ? labels.viewQuestionSet : labels.startAttempt
+  const handleCta = isReadOnly ? onView : onStartAttempt
 
   return (
     <article className="course-page__set-card course-page__set-preview">
-      <div className="course-page__set-preview-toolbar">
-        <button
-          type="button"
-          className="course-page__set-delete-btn course-page__set-delete-btn--inline"
-          onClick={onDelete}
-          aria-label={deleteAriaLabel}
-        >
-          <span aria-hidden>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <path
-                d="M9 3.75h6m-7.5 3h9m-7.5 3.75v7.5m3-7.5v7.5m4.875-10.5-.662 9.272A2.25 2.25 0 0 1 13.97 21h-3.94a2.25 2.25 0 0 1-2.243-2.028L7.125 7.5"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </span>
-        </button>
-      </div>
+      {!isReadOnly ? (
+        <div className="course-page__set-preview-toolbar">
+          <button
+            type="button"
+            className="course-page__set-delete-btn course-page__set-delete-btn--inline"
+            onClick={onDelete}
+            aria-label={deleteAriaLabel}
+          >
+            <span aria-hidden>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M9 3.75h6m-7.5 3h9m-7.5 3.75v7.5m3-7.5v7.5m4.875-10.5-.662 9.272A2.25 2.25 0 0 1 13.97 21h-3.94a2.25 2.25 0 0 1-2.243-2.028L7.125 7.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+          </button>
+        </div>
+      ) : null}
       <div className="course-page__set-preview-body">
         <p className="course-page__set-card-title">{title}</p>
         <div className="course-page__set-meta-badges">
@@ -328,10 +334,10 @@ function QuestionSetPreviewCard({
         <button
           type="button"
           className="course-page__start-attempt-btn"
-          onClick={onStartAttempt}
+          onClick={handleCta}
           disabled={startDisabled}
         >
-          {isStarting ? labels.questionSetLoading : labels.startAttempt}
+          {isStarting ? labels.questionSetLoading : ctaLabel}
         </button>
       </div>
     </article>
@@ -352,7 +358,7 @@ function QuestionReviewList({
   backLabel,
 }) {
   const isPractice = questionMode === 'practice'
-  const shouldReveal = questionMode === 'results'
+  const shouldReveal = questionMode === 'results' || questionMode === 'read'
 
   return (
     <>
@@ -517,6 +523,8 @@ export default function CoursePage() {
   const [progressError, setProgressError] = useState(null)
   const [courseVisibility, setCourseVisibility] = useState(null)
   const [canEditVisibility, setCanEditVisibility] = useState(false)
+  const [accessMode, setAccessMode] = useState(null)
+  const [accessDeniedKind, setAccessDeniedKind] = useState(null)
   const [isVisibilitySaving, setIsVisibilitySaving] = useState(false)
   const [visibilityNotice, setVisibilityNotice] = useState(null)
   const [isConfirmPublicOpen, setIsConfirmPublicOpen] = useState(false)
@@ -530,6 +538,8 @@ export default function CoursePage() {
   const [courseName, setCourseName] = useState(initialCourseName)
   const displayCourseName = courseName || t.home.untitledCourse
   const courseId = courseIdParam?.trim() ?? ''
+  const isOwner = accessMode === 'owner'
+  const isVisitor = accessMode === 'public_read'
 
   useEffect(() => {
     if (!initialCourseName || initialCourseName === courseName) return
@@ -537,44 +547,54 @@ export default function CoursePage() {
   }, [initialCourseName, courseName])
 
   useEffect(() => {
-    if (!courseId) return undefined
+    if (authStatus !== 'authed' || !courseId) return undefined
     let cancelled = false
     setCanEditVisibility(false)
+    setAccessMode(null)
+    setAccessDeniedKind(null)
 
     ;(async () => {
       try {
-        const user = await getCurrentUser()
-        const userId = String(user?.userId ?? '').trim()
-        if (!userId) return
         const session = await fetchAuthSession()
         const idToken = session.tokens?.idToken?.toString()
-        if (!idToken) return
-        const courses = await getUserCourses(userId, idToken)
+        if (!idToken) {
+          if (!cancelled) {
+            setAccessMode('denied')
+            setAccessDeniedKind('forbidden')
+          }
+          return
+        }
+        const course = await getCourse(courseId, idToken)
         if (cancelled) return
-        const matchedCourse = Array.isArray(courses)
-          ? courses.find((course) => {
-              const id = String(course?.course_id ?? course?.id ?? course?.courseId ?? '').trim()
-              return id === courseId
-            })
-          : null
-        if (!matchedCourse) return
-        const fallbackName = String(
-          matchedCourse?.course_name ?? matchedCourse?.name ?? '',
-        ).trim()
+        const fallbackName = String(course?.course_name ?? course?.name ?? '').trim()
         if (fallbackName) {
           setCourseName(fallbackName)
         }
-        setCourseVisibility(normalizeCourseVisibility(matchedCourse.visibility))
-        setCanEditVisibility(true)
-      } catch {
-        // Keep UI fallback title when metadata fetch fails; hide visibility control.
+        setCourseVisibility(normalizeCourseVisibility(course.visibility))
+        const owner = course?.is_owner === true
+        setAccessMode(owner ? 'owner' : 'public_read')
+        setCanEditVisibility(owner)
+        if (!owner) {
+          const tab = searchParams.get('tab')
+          if (tab === 'attempts' || tab === 'weaknesses') {
+            setActiveTab('materials')
+          }
+        }
+      } catch (err) {
+        if (cancelled) return
+        const status = err?.response?.status
+        setAccessMode('denied')
+        setAccessDeniedKind(status === 404 ? 'not_found' : 'forbidden')
+        setCanEditVisibility(false)
       }
     })()
 
     return () => {
       cancelled = true
     }
-  }, [courseId])
+    // Access mode is resolved from GET /courses/{id}; tab coercion uses the URL at resolve time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authStatus, courseId])
 
   const loadDocuments = useCallback(async ({ silent = false } = {}) => {
     if (!courseId) return null
@@ -657,7 +677,7 @@ export default function CoursePage() {
   }, [courseId, t])
 
   const loadQuestionSetDetails = useCallback(
-    async (setId, { startPractice = false } = {}) => {
+    async (setId, { startPractice = false, readOnly = false } = {}) => {
       if (!courseId || !setId) return false
       setSetQuestionsLoading(true)
       setSetQuestionsError(null)
@@ -682,6 +702,9 @@ export default function CoursePage() {
           }
           setQuestionMode('practice')
           setPracticeStartTime(Date.now())
+        } else if (readOnly) {
+          setQuestionMode('read')
+          setPracticeStartTime(null)
         } else {
           setQuestionMode(null)
           setPracticeStartTime(null)
@@ -761,41 +784,46 @@ export default function CoursePage() {
 
   useEffect(() => {
     if (authStatus !== 'authed' || !courseId) return
+    if (accessMode !== 'owner' && accessMode !== 'public_read') return
     loadDocuments({ silent: activeTab !== 'materials' })
     // Prefetch once per course/auth; silent when landing on a non-materials tab.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authStatus, courseId, loadDocuments])
+  }, [authStatus, courseId, loadDocuments, accessMode])
 
   useEffect(() => {
     if (authStatus !== 'authed' || !courseId || activeTab !== 'questionSets') return
+    if (accessMode !== 'owner' && accessMode !== 'public_read') return
     loadQuestionSets()
-  }, [authStatus, courseId, activeTab, loadQuestionSets])
+  }, [authStatus, courseId, activeTab, loadQuestionSets, accessMode])
 
   useEffect(() => {
     if (skipSetAutoLoadRef.current) return
     if (authStatus !== 'authed' || activeTab !== 'questionSets' || !selectedQuestionSet?.set_id) return
-    if (questionMode === 'practice' || questionMode === 'results') return
-    loadQuestionSetDetails(selectedQuestionSet.set_id)
+    if (questionMode === 'practice' || questionMode === 'results' || questionMode === 'read') return
+    loadQuestionSetDetails(selectedQuestionSet.set_id, { readOnly: isVisitor })
   }, [
     authStatus,
     activeTab,
     selectedQuestionSet?.set_id,
     questionMode,
     loadQuestionSetDetails,
+    isVisitor,
   ])
 
   useEffect(() => {
     if (authStatus !== 'authed' || !courseId || activeTab !== 'attempts') return
+    if (accessMode !== 'owner') return
     loadCourseAttempts()
     if (questionSets.length === 0) {
       loadQuestionSets()
     }
-  }, [authStatus, courseId, activeTab, loadCourseAttempts, loadQuestionSets, questionSets.length])
+  }, [authStatus, courseId, activeTab, loadCourseAttempts, loadQuestionSets, questionSets.length, accessMode])
 
   useEffect(() => {
     if (authStatus !== 'authed' || !courseId || activeTab !== 'weaknesses') return
+    if (accessMode !== 'owner') return
     loadCourseProgress()
-  }, [authStatus, courseId, activeTab, loadCourseProgress])
+  }, [authStatus, courseId, activeTab, loadCourseProgress, accessMode])
 
   useEffect(() => {
     if (activeTab !== 'attempts') return
@@ -829,7 +857,7 @@ export default function CoursePage() {
     setQuestionSetsNotice(null)
     setLastSubmittedScore(null)
 
-    if (questionMode !== 'results') return
+    if (questionMode !== 'results' && questionMode !== 'read') return
 
     // Past-attempt review on the attempts tab also uses questionMode === 'results'.
     if (activeTab === 'attempts' && viewingPastAttempt) return
@@ -919,6 +947,30 @@ export default function CoursePage() {
     [courseId, startingSetId, loadQuestionSetDetails],
   )
 
+  const handleViewQuestionSet = useCallback(
+    async (setItem) => {
+      const setId = setItem?.set_id
+      if (!courseId || !setId || startingSetId) return
+
+      setStartingSetId(setId)
+      setSetQuestionsError(null)
+      setQuestionSetsNotice(null)
+      setLastSubmittedScore(null)
+      setSelectedQuestionSet(setItem)
+
+      skipSetAutoLoadRef.current = true
+      const loaded = await loadQuestionSetDetails(setId, { readOnly: true })
+      skipSetAutoLoadRef.current = false
+
+      if (!loaded) {
+        setSelectedQuestionSet(null)
+        setSetQuestions([])
+      }
+      setStartingSetId(null)
+    },
+    [courseId, startingSetId, loadQuestionSetDetails],
+  )
+
   const eligibleDocIds = documents.reduce((acc, doc, index) => {
     const id = String(doc.document_id ?? doc.documentId ?? `doc-${index}`)
     const status = normalizeProcessingStatus(doc.processing_status ?? doc.processingStatus)
@@ -947,6 +999,7 @@ export default function CoursePage() {
 
   useEffect(() => {
     if (authStatus !== 'authed' || !courseId || !shouldPollDocuments) return undefined
+    if (!isOwner) return undefined
     if (isGeneratingQuiz) return undefined
     if (activeTab !== 'materials') return undefined
 
@@ -955,7 +1008,7 @@ export default function CoursePage() {
     }, DOCUMENT_POLL_INTERVAL_MS)
 
     return () => window.clearInterval(intervalId)
-  }, [authStatus, courseId, shouldPollDocuments, isGeneratingQuiz, activeTab, loadDocuments])
+  }, [authStatus, courseId, shouldPollDocuments, isGeneratingQuiz, activeTab, loadDocuments, isOwner])
 
   const closeUploadModal = useCallback(() => {
     dragDepthRef.current = 0
@@ -1129,20 +1182,32 @@ export default function CoursePage() {
     const setParam = searchParams.get('set')
     if (tabParam === 'questionSets' && activeTab !== 'questionSets') {
       setActiveTab('questionSets')
-    } else if (tabParam === 'attempts' && activeTab !== 'attempts') {
+    } else if (tabParam === 'attempts' && accessMode === 'owner' && activeTab !== 'attempts') {
       setActiveTab('attempts')
-    } else if (tabParam === 'weaknesses' && activeTab !== 'weaknesses') {
+    } else if (tabParam === 'weaknesses' && accessMode === 'owner' && activeTab !== 'weaknesses') {
       setActiveTab('weaknesses')
-    } else if (!tabParam && activeTab !== 'materials') {
+    } else if (
+      (tabParam === 'attempts' || tabParam === 'weaknesses') &&
+      isVisitor &&
+      activeTab !== 'materials'
+    ) {
+      setActiveTab('materials')
+    } else if (!tabParam && activeTab !== 'materials' && activeTab !== 'questionSets') {
       setActiveTab('materials')
     }
-    if (!setParam && selectedQuestionSet?.set_id && questionMode !== 'practice' && questionMode !== 'results') {
+    if (
+      !setParam &&
+      selectedQuestionSet?.set_id &&
+      questionMode !== 'practice' &&
+      questionMode !== 'results' &&
+      questionMode !== 'read'
+    ) {
       setSelectedQuestionSet(null)
       setSetQuestions([])
       setSetQuestionsError(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams])
+  }, [searchParams, accessMode, isVisitor])
 
   useEffect(() => {
     if (!isUploadModalOpen) return undefined
@@ -1281,12 +1346,46 @@ export default function CoursePage() {
     return <Navigate to="/" replace />
   }
 
+  if (accessMode === null) {
+    return (
+      <main className="course-page" dir={dir} lang={lang}>
+        <section className="course-page__loading">
+          <p className="course-page__loading-text">{t.coursePage.loading}</p>
+        </section>
+      </main>
+    )
+  }
+
+  if (accessMode === 'denied') {
+    return (
+      <main className="course-page" dir={dir} lang={lang}>
+        <div className="course-page__top-bar">
+          <button
+            type="button"
+            className="course-page__back-btn"
+            onClick={() => navigate('/home')}
+          >
+            {t.coursePage.backToDashboard}
+          </button>
+        </div>
+        <section className="course-page__access-error" role="alert">
+          <p className="course-page__access-error-text">
+            {accessDeniedKind === 'not_found'
+              ? t.coursePage.courseNotFound
+              : t.coursePage.accessDenied}
+          </p>
+        </section>
+      </main>
+    )
+  }
+
   const materialsCount = documents.length
   const showDocSkeleton = documentsLoading && documents.length === 0
   const showDocList = !showDocSkeleton && !documentsError && documents.length > 0
   const showDocEmpty = !showDocSkeleton && !documentsLoading && !documentsError && documents.length === 0
   const showQuestionSetsSkeleton = questionSetsLoading && questionSets.length === 0
-  const inQuizSession = questionMode === 'practice' || questionMode === 'results'
+  const inQuizSession =
+    questionMode === 'practice' || questionMode === 'results' || questionMode === 'read'
   const quizContentDir =
     inQuizSession || viewingPastAttempt
       ? resolveQuizContentDir(selectedQuestionSet)
@@ -1590,7 +1689,7 @@ export default function CoursePage() {
 
   return (
     <main
-      className={`course-page ${selectedDocIds.length > 0 ? 'course-page--with-action-bar' : ''}`}
+      className={`course-page ${isOwner && selectedDocIds.length > 0 ? 'course-page--with-action-bar' : ''}`}
       dir={dir}
       lang={lang}
     >
@@ -1679,6 +1778,10 @@ export default function CoursePage() {
                 </p>
               ) : null}
             </div>
+          ) : courseVisibility ? (
+            <div className="course-page__visibility">
+              <CourseVisibilityBadge visibility={courseVisibility} labels={t.home} />
+            </div>
           ) : null}
         </div>
       </header>
@@ -1709,26 +1812,30 @@ export default function CoursePage() {
             >
               {t.coursePage.tabQuestionSets}
             </button>
-            <button
-              type="button"
-              className={`course-page__inner-nav-item ${
-                activeTab === 'attempts' ? 'course-page__inner-nav-item--active' : ''
-              }`}
-              onClick={() => setActiveTab('attempts')}
-              aria-current={activeTab === 'attempts' ? 'page' : undefined}
-            >
-              {t.coursePage.tabAttempts}
-            </button>
-            <button
-              type="button"
-              className={`course-page__inner-nav-item ${
-                activeTab === 'weaknesses' ? 'course-page__inner-nav-item--active' : ''
-              }`}
-              onClick={() => setActiveTab('weaknesses')}
-              aria-current={activeTab === 'weaknesses' ? 'page' : undefined}
-            >
-              {t.coursePage.tabWeaknesses}
-            </button>
+            {isOwner ? (
+              <>
+                <button
+                  type="button"
+                  className={`course-page__inner-nav-item ${
+                    activeTab === 'attempts' ? 'course-page__inner-nav-item--active' : ''
+                  }`}
+                  onClick={() => setActiveTab('attempts')}
+                  aria-current={activeTab === 'attempts' ? 'page' : undefined}
+                >
+                  {t.coursePage.tabAttempts}
+                </button>
+                <button
+                  type="button"
+                  className={`course-page__inner-nav-item ${
+                    activeTab === 'weaknesses' ? 'course-page__inner-nav-item--active' : ''
+                  }`}
+                  onClick={() => setActiveTab('weaknesses')}
+                  aria-current={activeTab === 'weaknesses' ? 'page' : undefined}
+                >
+                  {t.coursePage.tabWeaknesses}
+                </button>
+              </>
+            ) : null}
           </div>
         </nav>
 
@@ -1739,6 +1846,7 @@ export default function CoursePage() {
                 <h2 className="course-page__materials-heading course-page__materials-heading--panel">
                   {t.coursePage.materialsHeading}
                 </h2>
+                {isOwner ? (
                 <div className="course-page__materials-actions">
                   <button
                     type="button"
@@ -1779,6 +1887,7 @@ export default function CoursePage() {
                     {t.coursePage.deleteCourseLabel}
                   </button>
                 </div>
+                ) : null}
               </div>
 
               {showDocSkeleton ? (
@@ -1823,7 +1932,9 @@ export default function CoursePage() {
               ) : null}
 
               {showDocEmpty ? (
-                <p className="course-page__materials-empty">{t.coursePage.documentsListEmpty}</p>
+                <p className="course-page__materials-empty">
+                  {isVisitor ? t.coursePage.materialsEmpty : t.coursePage.documentsListEmpty}
+                </p>
               ) : null}
 
               {showDocList ? (
@@ -1834,6 +1945,19 @@ export default function CoursePage() {
                   {documents.map((doc, index) => {
                     const id = doc.document_id ?? doc.documentId ?? `doc-${index}`
                     const name = doc.original_file_name ?? doc.originalFileName ?? '—'
+                    if (isVisitor) {
+                      return (
+                        <li key={String(id)} className="course-page__doc-card">
+                          <div className="course-page__doc-card-main">
+                            <span className="course-page__doc-card-name-row">
+                              <span className="course-page__doc-card-name" title={String(name)}>
+                                {String(name)}
+                              </span>
+                            </span>
+                          </div>
+                        </li>
+                      )
+                    }
                     const created = doc.created_at ?? doc.createdAt
                     const status = doc.processing_status ?? doc.processingStatus ?? ''
                     const normalizedStatus = normalizeProcessingStatus(status)
@@ -1985,9 +2109,11 @@ export default function CoursePage() {
                               txFn={tx}
                               formatDocumentDateFn={formatDocumentDate}
                               formatDifficultySummaryFn={formatDifficultySummary}
+                              isReadOnly={isVisitor}
                               isStarting={startingSetId === setId}
                               startDisabled={Boolean(startingSetId) || questionCount === 0}
                               onStartAttempt={() => handleStartAttemptFromSet(setItem)}
+                              onView={() => handleViewQuestionSet(setItem)}
                               onDelete={() => setSetPendingDelete(setItem)}
                               deleteAriaLabel={tx(t.coursePage.deleteSetAria, {
                                 name:
@@ -2022,7 +2148,9 @@ export default function CoursePage() {
                     </p>
                   ) : null}
                   {!setQuestionsLoading &&
-                  (questionMode === 'practice' || questionMode === 'results') ? (
+                  (questionMode === 'practice' ||
+                    questionMode === 'results' ||
+                    questionMode === 'read') ? (
                     <QuestionReviewList
                       questions={setQuestions}
                       practiceAnswers={practiceAnswers}
@@ -2038,15 +2166,23 @@ export default function CoursePage() {
                       isSubmittingAttempt={isSubmittingAttempt}
                       onCancelAttempt={handleCancelAttempt}
                       onSubmitQuiz={handleSubmitQuiz}
-                      onBack={questionMode === 'results' ? handleCloseQuestionSet : undefined}
-                      backLabel={questionMode === 'results' ? t.coursePage.backToSets : undefined}
+                      onBack={
+                        questionMode === 'results' || questionMode === 'read'
+                          ? handleCloseQuestionSet
+                          : undefined
+                      }
+                      backLabel={
+                        questionMode === 'results' || questionMode === 'read'
+                          ? t.coursePage.backToSets
+                          : undefined
+                      }
                     />
                   ) : null}
                 </div>
               )}
             </section>
           ) : null}
-          {activeTab === 'attempts' ? (
+          {isOwner && activeTab === 'attempts' ? (
             <section aria-label={t.coursePage.attemptsSectionLabel}>
               <div className="course-page__materials-header">
                 <h2 className="course-page__materials-heading course-page__materials-heading--panel">
@@ -2208,7 +2344,7 @@ export default function CoursePage() {
               )}
             </section>
           ) : null}
-          {activeTab === 'weaknesses' ? (
+          {isOwner && activeTab === 'weaknesses' ? (
             <section aria-label={t.coursePage.weaknessesSectionLabel}>
               <div className="course-page__materials-header">
                 <h2 className="course-page__materials-heading course-page__materials-heading--panel">
@@ -2792,7 +2928,7 @@ export default function CoursePage() {
           </section>
         </div>
       ) : null}
-      {selectedDocIds.length > 0 ? (
+      {isOwner && selectedDocIds.length > 0 ? (
         <div className="course-page__quiz-action-bar" role="status" aria-live="polite">
           <p className="course-page__quiz-action-count">
             {tx(t.coursePage.quizSelectedCount, { count: selectedDocIds.length })}

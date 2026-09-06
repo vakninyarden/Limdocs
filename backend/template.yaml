@@ -356,8 +356,8 @@ Resources:
       Handler: get_public_courses.lambda_handler
       Runtime: python3.9
       Timeout: 30
-      # LabRole must include dynamodb:Query on courses/visibility_courses_index
-      # and documents/CourseIdIndex.
+      # LabRole must include dynamodb:Query on courses/visibility_courses_index,
+      # dynamodb:BatchGetItem on courses, and dynamodb:Query on documents/CourseIdIndex.
       # Function timeout is bounded in practice by API Gateway's 29-second integration limit.
       Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
       Environment:
@@ -486,6 +486,25 @@ Resources:
             RestApiId: !Ref LimdocsApi
             Path: /courses/{courseId}/documents/{documentId}
             Method: delete
+
+  GetCourseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: limdocs-get-course
+      CodeUri: src/
+      Handler: get_course.lambda_handler
+      Runtime: python3.9
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Environment:
+        Variables:
+          COURSES_TABLE: !Ref LimdocsCoursesTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref LimdocsApi
+            Path: /courses/{courseId}
+            Method: get
 
   DeleteCourseFunction:
     Type: AWS::Serverless::Function

@@ -28,6 +28,7 @@ class GetCoursesTests(unittest.TestCase):
     def setUp(self):
         self.table_mock = MagicMock()
         get_courses._table = self.table_mock
+        get_courses.INDEX_NAME = "owner_courses_index"
 
     def test_sub_mismatch_returns_403(self):
         resp = get_courses.lambda_handler(_auth_event(sub="user-a", user_id="user-b"), None)

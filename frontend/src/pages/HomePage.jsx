@@ -362,6 +362,45 @@ function OwnerCourseCard({
   )
 }
 
+function ForeignExploreCourseCard({
+  courseName,
+  creatorLine,
+  visibility,
+  visibilityLabels,
+  docsLabel,
+  activityLabel,
+  openAria,
+  onOpen,
+}) {
+  return (
+    <button
+      type="button"
+      className="home-page__course-card"
+      onClick={onOpen}
+      aria-label={openAria}
+    >
+      <div className="home-page__course-card-body">
+        <div className="home-page__course-card-title-row">
+          <span className="home-page__course-name">{courseName}</span>
+          <CourseVisibilityBadge visibility={visibility} labels={visibilityLabels} />
+        </div>
+        {creatorLine ? <p className="home-page__course-creator">{creatorLine}</p> : null}
+        <div className="home-page__course-meta">
+          <span className="home-page__course-meta-item">
+            <IconMetaDoc />
+            <span>{docsLabel}</span>
+          </span>
+          <span className="home-page__course-meta-item">
+            <IconMetaClock />
+            <span>{activityLabel}</span>
+          </span>
+        </div>
+      </div>
+      <IconChevronEnd />
+    </button>
+  )
+}
+
 export default function HomePage() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -1005,33 +1044,32 @@ export default function HomePage() {
                   const activityTime = activityPhrase ?? t.home.courseMetaUnknown
                   const activityLabel = tx(t.home.courseMetaActivity, { time: activityTime })
                   const docsLabel = tx(t.home.courseMetaDocs, { count: docCount })
+                  const ownerUsername =
+                    typeof course.owner_username === 'string' ? course.owner_username.trim() : ''
+                  const creatorLine = ownerUsername
+                    ? tx(t.home.exploreCourseBy, { username: ownerUsername })
+                    : ''
 
                   return (
                     <li
                       key={String(courseId || courseName)}
                       className="home-page__courses-grid-item"
                     >
-                      <div className="home-page__course-card home-page__course-card--static">
-                        <div className="home-page__course-card-body">
-                          <div className="home-page__course-card-title-row">
-                            <span className="home-page__course-name">{courseName}</span>
-                            <CourseVisibilityBadge
-                              visibility={normalizeCourseVisibility(course.visibility)}
-                              labels={t.home}
-                            />
-                          </div>
-                          <div className="home-page__course-meta">
-                            <span className="home-page__course-meta-item">
-                              <IconMetaDoc />
-                              <span>{docsLabel}</span>
-                            </span>
-                            <span className="home-page__course-meta-item">
-                              <IconMetaClock />
-                              <span>{activityLabel}</span>
-                            </span>
-                          </div>
-                        </div>
-                      </div>
+                      <ForeignExploreCourseCard
+                        courseName={courseName}
+                        creatorLine={creatorLine}
+                        visibility={normalizeCourseVisibility(course.visibility)}
+                        visibilityLabels={t.home}
+                        docsLabel={docsLabel}
+                        activityLabel={activityLabel}
+                        openAria={tx(t.home.exploreCourseOpenAria, { name: courseName })}
+                        onOpen={() => {
+                          if (!courseId) return
+                          navigate(`/course/${encodeURIComponent(String(courseId))}`, {
+                            state: { courseName },
+                          })
+                        }}
+                      />
                     </li>
                   )
                 })}

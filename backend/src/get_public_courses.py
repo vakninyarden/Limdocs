@@ -11,6 +11,9 @@ DOCUMENTS_TABLE = os.environ["DOCUMENTS_TABLE"]
 VISIBILITY_INDEX_NAME = os.environ["VISIBILITY_INDEX_NAME"]
 DOCUMENTS_COURSE_INDEX = os.environ["DOCUMENTS_COURSE_INDEX"]
 
+_BATCH_GET_MAX_KEYS = 100
+_BATCH_GET_MAX_RETRIES = 8
+
 _dynamodb = boto3.resource("dynamodb")
 _courses_table = _dynamodb.Table(COURSES_TABLE)
 _documents_table = _dynamodb.Table(DOCUMENTS_TABLE)
@@ -84,6 +87,76 @@ def _is_public(item):
     return isinstance(value, str) and value.strip() == "PUBLIC"
 
 
+def _chunked(items, size):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+
+def _course_primary_key(course):
+    course_id = course.get("course_id")
+    if not course_id or not str(course_id).strip():
+        return None
+    return {"course_id": course_id}
+
+
+def _unique_course_keys(courses):
+    unique = []
+    seen = set()
+    for course in courses:
+        key = _course_primary_key(course)
+        if not key:
+            continue
+        identity = key["course_id"]
+        if identity in seen:
+            continue
+        seen.add(identity)
+        unique.append(key)
+    return unique
+
+
+def _record_owner_username(usernames, item):
+    course_id = item.get("course_id")
+    if not course_id:
+        return
+    username = item.get("owner_username")
+    if isinstance(username, str) and username.strip():
+        usernames[course_id] = username.strip()
+
+
+def _batch_get_owner_usernames(courses):
+    """Load owner_username from the base courses table (not the visibility GSI)."""
+    usernames = {}
+    unique_keys = _unique_course_keys(courses)
+    if not unique_keys:
+        return usernames
+
+    for chunk in _chunked(unique_keys, _BATCH_GET_MAX_KEYS):
+        request_items = {
+            COURSES_TABLE: {
+                "Keys": chunk,
+                "ProjectionExpression": "course_id, owner_username",
+            }
+        }
+        retries = 0
+        while request_items:
+            result = _dynamodb.batch_get_item(RequestItems=request_items)
+            for item in result.get("Responses", {}).get(COURSES_TABLE, []) or []:
+                _record_owner_username(usernames, item)
+            unprocessed = (result.get("UnprocessedKeys") or {}).get(COURSES_TABLE)
+            if unprocessed:
+                retries += 1
+                if retries > _BATCH_GET_MAX_RETRIES:
+                    logger.warning(
+                        "batch_get_item UnprocessedKeys remaining after %s retries",
+                        _BATCH_GET_MAX_RETRIES,
+                    )
+                    break
+                request_items = {COURSES_TABLE: unprocessed}
+            else:
+                request_items = None
+    return usernames
+
+
 def _course_document_stats(course_id):
     params = {
         "IndexName": DOCUMENTS_COURSE_INDEX,
@@ -118,8 +191,8 @@ def _last_updated_at(course, docs_latest_iso):
     return _max_iso(course.get("updated_at"), docs_latest_iso, course.get("created_at"))
 
 
-def _sanitize_public_course(course, user_sub, document_count, last_updated_at):
-    return {
+def _sanitize_public_course(course, user_sub, document_count, last_updated_at, owner_username=None):
+    payload = {
         "course_id": course.get("course_id"),
         "course_name": course.get("course_name"),
         "visibility": "PUBLIC",
@@ -127,6 +200,9 @@ def _sanitize_public_course(course, user_sub, document_count, last_updated_at):
         "document_count": document_count,
         "last_updated_at": last_updated_at,
     }
+    if isinstance(owner_username, str) and owner_username.strip():
+        payload["owner_username"] = owner_username.strip()
+    return payload
 
 
 def lambda_handler(event, context):
@@ -145,17 +221,30 @@ def lambda_handler(event, context):
         if not user_sub:
             return _response(401, {"message": "Unauthorized: missing user identity"})
 
-        results = []
+        public_courses = []
         for course in _query_public_courses():
             if not _is_public(course):
                 continue
             course_id = course.get("course_id")
             if not course_id or not str(course_id).strip():
                 continue
+            public_courses.append(course)
+
+        owner_usernames = _batch_get_owner_usernames(public_courses)
+
+        results = []
+        for course in public_courses:
+            course_id = course.get("course_id")
             doc_count, docs_latest = _course_document_stats(course_id)
             last_updated = _last_updated_at(course, docs_latest)
             results.append(
-                _sanitize_public_course(course, user_sub, doc_count, last_updated)
+                _sanitize_public_course(
+                    course,
+                    user_sub,
+                    doc_count,
+                    last_updated,
+                    owner_usernames.get(course_id),
+                )
             )
 
         return _response(200, {"courses": results})

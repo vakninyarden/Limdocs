@@ -17,7 +17,7 @@ Limdocs is an adaptive learning platform for students: create course spaces, upl
 
 - **Sign up and sign in** with AWS Cognito (email/username), including account confirmation; sync profile via `POST /users` after signup
 - **Switch Hebrew ↔ English** with persisted preference and full RTL/LTR layout
-- **Create and manage courses** from the dashboard (private or public visibility stored on the course; owners can change visibility from the course page via `PATCH /courses/{courseId}/visibility`; **browse public courses** on the Home **Explore Courses** tab via `GET /courses/public`, which follows the `visibility_courses_index` GSI — metadata only for courses you do not own; opening another user's course is not supported)
+- **Create and manage courses** from the dashboard (private or public visibility stored on the course; owners can change visibility from the course page via `PATCH /courses/{courseId}/visibility`; **browse public courses** on the Home **Explore Courses** tab via `GET /courses/public`, which follows the `visibility_courses_index` GSI; foreign public cards show the creator username and open the course in read-only mode)
 - **Upload materials** via S3 pre-signed URLs (PDF, PNG, JPEG; **20 MB** max per file via `file_size_bytes`)
 - **Process documents** asynchronously: S3 `uploads/` trigger → Textract → bilingual sub-topic extraction (OpenAI) → `READY` with topic chips on the Materials tab
 - **Generate question sets** from one or more `READY` documents: async API + worker Lambdas, UI polling until documents leave `GENERATING`, optional **5/10/15/20** questions, **Hebrew or English** quiz language, and **weakness-focused** mode that prioritizes your weakest topics from `user_progress`
@@ -27,7 +27,7 @@ Limdocs is an adaptive learning platform for students: create course spaces, upl
 - **Home dashboard** shows live per-course stats (document count, relative last activity, progress bar from averaged topic mastery) while stub nav items (global search, Documents / Analytics) remain presentational
 - **Delete** documents, attempts, question sets, or entire courses (cascading S3 + DynamoDB cleanup, including `user_progress` on course delete)
 
-**Course page tabs:** Materials, Question Sets, Attempts, Analyzed Weaknesses (deep-link with `?tab=questionSets` or `?tab=weaknesses`).
+**Course page tabs:** Materials, Question Sets, Attempts, Analyzed Weaknesses (deep-link with `?tab=questionSets` or `?tab=weaknesses`). Visitors on a public course see Materials (filenames only) and Question Sets (view/read only); Attempts and Analyzed Weaknesses stay owner-only.
 
 ---
 
@@ -48,7 +48,7 @@ Browser (React SPA)
     → delete attempt → subtract matrix_deltas (rebuild fallback on drift)
 ```
 
-Owner-only authorization for course-scoped APIs is enforced in Lambda via `course_access.require_course_owner` (Cognito `sub` vs `owner_id`).
+Course-scoped APIs use `course_access.resolve_course_access` (Cognito `sub` vs `owner_id`, plus `PUBLIC` for logged-in visitors). Mutations, attempts, and progress stay on `require_course_owner` (public visitors get 403).
 
 ### AWS resources (SAM stack)
 
@@ -57,7 +57,7 @@ Owner-only authorization for course-scoped APIs is enforced in Lambda via `cours
 | **Cognito User Pool** | Authentication for the SPA |
 | **AWS Amplify Hosting** | Frontend hosting and CI/CD deployment from GitHub |
 | **API Gateway** | REST API (`/prod` stage), default Cognito authorizer |
-| **Lambda** | 18 functions: HTTP handlers, `process_document` (S3), `generate_questions` API + worker (async, no retries) |
+| **Lambda** | 19 functions: HTTP handlers, `process_document` (S3), `generate_questions` API + worker (async, no retries) |
 | **DynamoDB** | `users`, `courses`, `documents`, `question_sets`, `questions`, `attempts`, `attempt_answers`, `user_progress` |
 | **S3** | Raw uploads (`limdocs-raw-uploads-{account}`) and processed text (`limdocs-processed-outputs-{account}`) |
 | **Textract** | OCR for uploaded PDFs/images |
@@ -177,22 +177,23 @@ python -m pytest tests/
 
 ### Main API surface
 
-All routes require Cognito auth unless noted. Owner checks apply on course-scoped operations.
+All routes require Cognito auth unless noted. Course-scoped reads use owner or public-read access; mutations, attempts, and progress stay owner-only.
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/users` | Sync user profile after signup |
 | `POST` | `/courses` | Create course (`course_name`, `description`, `is_public`) |
-| `GET` | `/courses/public` | List all public courses (sanitized metadata; `is_owner` derived from token `sub`). Reserved literal segment under `/courses/`. |
+| `GET` | `/courses/public` | List all public courses (sanitized metadata; `is_owner` derived from token `sub`; `owner_username` when present). Reserved literal segment under `/courses/`. |
+| `GET` | `/courses/{courseId}` | Course metadata for CoursePage (`course_id`, `course_name`, `visibility`, `is_owner`). Owner or logged-in visitor of a PUBLIC course; 403 for non-owner PRIVATE. |
 | `PATCH` | `/courses/{courseId}/visibility` | Owner-only: set `visibility` to `PUBLIC` or `PRIVATE`. Updates the `visibility_courses_index` GSI used by Explore. |
 | `GET` | `/users/{userId}/courses` | List caller's courses (`userId` must match token `sub`) |
 | `DELETE` | `/courses/{courseId}` | Delete course and all related data |
 | `POST` | `/courses/{courseId}/upload-url` | Pre-signed upload + document row (`file_name`, `file_type`, `file_size_bytes`) |
-| `GET` | `/courses/{courseId}/materials` | List course documents (includes `topics` when present) |
+| `GET` | `/courses/{courseId}/materials` | List course documents (owners: full items including `topics`; public visitors: `document_id` + `original_file_name` only) |
 | `DELETE` | `/courses/{courseId}/documents/{documentId}` | Delete document |
 | `POST` | `/courses/{courseId}/generate-quiz` | Start async question generation (`202`). Body: `document_ids` (required), optional `requested_question_count` (5/10/15/20), `quiz_language` (`he`/`en`, both required if either sent), `focus_weak_topics` (boolean) |
-| `GET` | `/courses/{courseId}/question-sets` | List question sets |
-| `GET` | `/courses/{courseId}/question-sets/{setId}` | Question set detail + questions |
+| `GET` | `/courses/{courseId}/question-sets` | List question sets (owner or public visitor) |
+| `GET` | `/courses/{courseId}/question-sets/{setId}` | Question set detail + questions (owner or public visitor; does not create an attempt) |
 | `DELETE` | `/courses/{courseId}/question-sets/{setId}` | Delete question set |
 | `POST` | `/courses/{courseId}/question-sets/{setId}/attempts` | Submit quiz attempt (`answers`, `time_spent_seconds`) |
 | `GET` | `/courses/{courseId}/attempts` | List attempts |
